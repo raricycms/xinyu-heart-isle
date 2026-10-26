@@ -1,0 +1,595 @@
+/* ==========================================================================
+   心屿 · 赛博沙盘
+   ========================================================================== */
+
+.sandbox-layout {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr) 264px;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+/* -------------------------------- 素材面板 -------------------------------- */
+
+.sandbox-panel {
+  position: sticky;
+  top: calc(var(--header-h) + var(--sp-4));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  max-height: calc(100vh - var(--header-h) - var(--sp-6));
+}
+
+.sandbox-panel__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sandbox-panel__tab {
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  background: var(--sand-100);
+  color: var(--ink-500);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.16s var(--ease);
+}
+
+.sandbox-panel__tab:hover {
+  color: var(--teal-600);
+  border-color: var(--teal-200);
+}
+
+.sandbox-panel__tab.is-active {
+  background: var(--teal-500);
+  border-color: var(--teal-500);
+  color: #fbfdfc;
+}
+
+.sandbox-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 6px;
+  overflow-y: auto;
+  padding: 2px;
+  flex: 1;
+  min-height: 0;
+}
+
+.sandbox-panel__count {
+  text-align: center;
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-2);
+}
+
+.sandbox-symbol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 2px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--sand-50);
+  cursor: pointer;
+  transition: all 0.16s var(--ease);
+}
+
+.sandbox-symbol:hover {
+  background: var(--teal-50);
+  border-color: var(--teal-200);
+  transform: translateY(-1px);
+}
+
+.sandbox-symbol:active {
+  transform: scale(0.94);
+}
+
+.sandbox-symbol__glyph {
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.sandbox-symbol__label {
+  font-size: 10.5px;
+  color: var(--ink-400);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* --------------------------------- 舞台 --------------------------------- */
+
+.sandbox-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.sandbox-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.sandbox-toolbar__scenes {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.sandbox-scene-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--ink-500);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.16s var(--ease);
+}
+
+.sandbox-scene-btn:hover {
+  border-color: var(--teal-300);
+  color: var(--teal-600);
+}
+
+.sandbox-scene-btn.is-active {
+  border-color: var(--teal-400);
+  background: var(--teal-50);
+  color: var(--teal-700);
+  font-weight: 500;
+}
+
+.sandbox-scene-btn__dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  flex: none;
+}
+
+/* --------------------------------- 画布 --------------------------------- */
+
+.sandbox-canvas {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--border-strong);
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    var(--shadow-sm);
+  cursor: default;
+}
+
+/* 细砂纹理：用重复渐变模拟，不依赖图片 */
+.sandbox-canvas::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image:
+    radial-gradient(rgba(120, 110, 95, 0.11) 1px, transparent 1px),
+    radial-gradient(rgba(255, 255, 255, 0.5) 1px, transparent 1px);
+  background-size: 9px 9px, 13px 13px;
+  background-position: 0 0, 4px 5px;
+}
+
+.sandbox-canvas--dark::before {
+  opacity: 0.28;
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px),
+    radial-gradient(rgba(140, 170, 200, 0.14) 1px, transparent 1px);
+}
+
+.sandbox-canvas__ground {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 42%;
+  pointer-events: none;
+}
+
+.sandbox-canvas__hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+  pointer-events: none;
+  padding: var(--sp-5);
+  opacity: 0.72;
+}
+
+.sandbox-canvas__hint-glyph {
+  font-size: 40px;
+  opacity: 0.35;
+  margin-bottom: 2px;
+}
+
+.sandbox-canvas__hint-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+
+.sandbox-canvas__hint-desc {
+  font-size: 12.5px;
+  line-height: 1.9;
+  opacity: 0.85;
+}
+
+/* --------------------------------- 摆件 --------------------------------- */
+
+.sandbox-item {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  cursor: grab;
+  transition: filter 0.16s var(--ease);
+  will-change: transform, left, top;
+}
+
+.sandbox-item:active,
+.sandbox-item.is-dragging {
+  cursor: grabbing;
+}
+
+.sandbox-item__glyph {
+  font-size: 30px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 3px rgba(40, 40, 35, 0.22));
+  transition: filter 0.16s var(--ease);
+  pointer-events: none;
+}
+
+.sandbox-item:hover .sandbox-item__glyph {
+  filter: drop-shadow(0 3px 6px rgba(40, 40, 35, 0.3));
+}
+
+.sandbox-item.is-selected {
+  z-index: 500 !important;
+}
+
+.sandbox-item.is-selected .sandbox-item__glyph {
+  filter:
+    drop-shadow(0 0 0 #fff)
+    drop-shadow(0 2px 5px rgba(40, 40, 35, 0.32))
+    drop-shadow(0 0 8px rgba(106, 154, 140, 0.9));
+}
+
+.sandbox-item.is-selected::after {
+  content: '';
+  position: absolute;
+  inset: -6px -4px;
+  border: 1.5px dashed var(--teal-400);
+  border-radius: var(--r-md);
+  pointer-events: none;
+}
+
+.sandbox-item__note {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: var(--r-full);
+  background: rgba(255, 253, 249, 0.92);
+  color: var(--ink-700);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* ------------------------------- 选中控制条 ------------------------------- */
+
+.sandbox-inspector {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: 10px var(--sp-4);
+  border: 1px solid var(--teal-200);
+  border-radius: var(--r-lg);
+  background: var(--teal-50);
+}
+
+.sandbox-inspector__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--teal-700);
+  white-space: nowrap;
+}
+
+.sandbox-inspector__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--ink-500);
+  min-width: 130px;
+}
+
+.sandbox-inspector__field .range {
+  width: 90px;
+}
+
+.sandbox-tip {
+  padding: 2px 2px 0;
+}
+
+/* -------------------------------- 右侧栏 -------------------------------- */
+
+.sandbox-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.sandbox-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.sandbox-prompts__item {
+  position: relative;
+  padding-left: 16px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--ink-700);
+}
+
+.sandbox-prompts__item::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0.66em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--teal-300);
+}
+
+.sandbox-snapshots {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sandbox-snapshot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--r-sm);
+  transition: background 0.16s var(--ease);
+}
+
+.sandbox-snapshot:hover {
+  background: var(--sand-100);
+}
+
+.sandbox-snapshot__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sandbox-snapshot__title {
+  font-size: 13px;
+  color: var(--ink-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-snapshot__meta {
+  font-size: 11px;
+}
+
+.sandbox-snapshot__del {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--ink-300);
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.16s var(--ease);
+}
+
+.sandbox-snapshot__del:hover {
+  background: var(--alert-50);
+  color: var(--alert-600);
+}
+
+/* -------------------------------- 快照卡片 -------------------------------- */
+
+.sandbox-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.sandbox-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 13.5px;
+  color: var(--ink-900);
+}
+
+.sandbox-card__head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-card__preview {
+  position: relative;
+  height: 92px;
+  border-radius: var(--r-sm);
+  background: linear-gradient(180deg, #f1efea, #e6e1d7);
+  overflow: hidden;
+}
+
+.sandbox-card__preview span {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  line-height: 1;
+}
+
+.sandbox-card__reflection {
+  color: var(--ink-500);
+  font-style: italic;
+  line-height: 1.7;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* -------------------------------- 弹层 --------------------------------- */
+
+.sandbox-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: rgba(35, 40, 42, 0.34);
+  backdrop-filter: blur(3px);
+  animation: fade-up 0.2s var(--ease) both;
+}
+
+.sandbox-modal__panel {
+  width: 100%;
+  max-width: 420px;
+  padding: var(--sp-5);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+}
+
+/* ------------------------------- 响应式 -------------------------------- */
+
+@media (max-width: 1180px) {
+  .sandbox-layout {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+  .sandbox-side {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    align-items: start;
+  }
+}
+
+@media (max-width: 860px) {
+  .sandbox-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* 面板改为纵向堆叠：分类条一行，素材条独立一行横向滚动 */
+  .sandbox-panel {
+    position: static;
+    max-height: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-2);
+    padding: var(--sp-2);
+  }
+  .sandbox-panel__tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    flex: none;
+    padding-bottom: 2px;
+  }
+  .sandbox-panel__tab {
+    flex: none;
+    white-space: nowrap;
+  }
+  .sandbox-panel__grid {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex: none;
+    max-height: none;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+  }
+  .sandbox-symbol {
+    flex: none;
+    width: 56px;
+  }
+  .sandbox-panel__count {
+    display: none;
+  }
+  .sandbox-canvas {
+    aspect-ratio: 1 / 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .sandbox-inspector {
+    gap: var(--sp-2);
+    padding: var(--sp-3);
+  }
+  .sandbox-inspector__field {
+    min-width: 112px;
+  }
+  .sandbox-inspector__field .range {
+    width: 68px;
+  }
+  .sandbox-item__glyph {
+    font-size: 26px;
+  }
+  .sandbox-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sandbox-canvas__hint-glyph {
+    font-size: 32px;
+  }
+}

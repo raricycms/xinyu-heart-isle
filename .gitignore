@@ -1,0 +1,32 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 开发期临时验证脚本与截图（Playwright 冒烟测试产物，不入库）
+.shots/
+.verify*.cjs
+.dist-check.cjs
+.deep-link.cjs
+.serve-dist.cjs
+*.png.tmp
