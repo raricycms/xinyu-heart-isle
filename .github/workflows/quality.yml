@@ -1,0 +1,85 @@
+name: quality
+
+# 门禁的最终执行者。没有 CI 的时候，所有「会红」的保证都只靠自觉；
+# 而这次审计恰好证明了「没人跑的门禁等于不存在」——
+# perf.ts 的判失败线曾经松到 3 倍、smoke.ts 场景崩溃会假绿，
+# 两处都活了很久，因为从来没人在一个干净环境里跑过它们。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    # 项目在 Windows 上开发（沙盘笔刷、截图、端口清理都有平台差异），
+    # 保持一致，避免「本地绿、CI 红」这种最消耗信任的失败模式。
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # ---- 类型 ----------------------------------------------------------
+      # 不需要 `--force`：实测 `tsc -b --noEmit` 单独就足以捕获
+      # TS6133（声明未使用）等错误，退出码 2。
+      - name: 类型检查（应用）
+        run: npx tsc -b --noEmit
+
+      # scripts/ 不在 tsc -b 的引用图里，必须单独检查
+      - name: 类型检查（脚本）
+        run: npx tsc -p tsconfig.scripts.json --noEmit
+
+      # ---- 构建 ----------------------------------------------------------
+      # 必须先于 vitest / E2E / a11y / perf：
+      # 体积预算和三个审计脚本都读 dist/。
+      # 顺序反了的话，perf.test.ts 的体积断言会被静默跳过（历史缺陷）。
+      - name: 构建
+        run: npx vite build
+
+      # ---- 测试 ----------------------------------------------------------
+      - name: 单元与性能
+        run: npx vitest run
+
+      - name: 格式校验器（样例）
+        run: node --experimental-strip-types --no-warnings scripts/validate-session.ts samples/example.sandplay.json
+
+      # 校验器必须能拒绝坏样例——只测「接受」不测「拒绝」等于只测了一半
+      - name: 格式校验器（拒绝坏样例）
+        shell: bash
+        run: |
+          set +e
+          node --experimental-strip-types --no-warnings scripts/validate-session.ts samples/broken.sandplay.json
+          code=$?
+          if [ "$code" -eq 1 ]; then
+            echo "✓ 正确拒绝了坏样例（退出码 1）"
+          else
+            echo "✗ 坏样例的退出码是 $code，期望 1"
+            exit 1
+          fi
+
+      # ---- 真浏览器门禁 --------------------------------------------------
+      - name: E2E 冒烟
+        run: node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts
+
+      - name: 无障碍审计
+        run: node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
+
+      - name: 性能预算
+        run: node --experimental-strip-types --no-warnings scripts/audit/perf.ts
+
+      - name: 上传失败截图
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: scripts/e2e/screenshots/
+          if-no-files-found: ignore

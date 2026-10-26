@@ -128,10 +128,14 @@ node --experimental-strip-types --no-warnings scripts/audit/a11y.ts --update-bas
 
 `it.fails` 已**全部清零**（曾 4 条，对应 4 个已确认缺陷，全部修复后转正）。
 
-### E2E：10 场景 / 108 断言
+### E2E：10 场景 / 120 断言
 
 > 断言数以 `npm run e2e` 输出的「合计：10 个场景，N 项断言」为准。
-> 这里原写 107，实测是 108（差的那 1 条在「深链接刷新」场景，6 项而非 5 项）。
+> 这里原写 107，实测 108；后来又补全了「全路由扫一遍」的动态路由
+> （`/sandbox/session/:id`、`/sandbox/session/:id/report`、`/sandbox/clients/:id`、
+> `/toolbox/:toolId`），断言数升到 120，覆盖 16 条路由。
+> 那个场景原名叫「每个路由都能渲染」但只列了 12 条，而 `App.tsx` 有 15 条——
+> 三条动态路由从没被验证过。**场景名里的「每个」是要能兑现的**。
 
 | 场景 | 断言 | 关键点 |
 |---|---|---|
@@ -537,9 +541,119 @@ v2.0 加了第 8 个笔刷（`flatten`）时就红了 —— 而加笔刷是功�
 > **规避**：数量断言用「≥N」表达下界意图，除非上界真的有业务含义。
 > 写死相等时问一句：**多一个为什么是错的？**
 
+#### 4.7.2 第二轮审计：七类更深的幽灵
+
+上面六种都还是「断言写错了」。第二轮换了判据：**把被测对象整个拿掉，门禁还绿不绿？**
+绿了，它就是幽灵。按这个判据又找出七类，全部已修并留了变异证据：
+
+**甲、崩溃即假绿（最坏的一种，因为它不出现在任何失败计数里）**
+
+`scripts/e2e/smoke.ts` 的场景 `catch` 只把异常推进 `results`，**不设 `hardFailure`**；
+最终判据是 `failedChecks === 0 && !hardFailure`，而 `failedChecks` 由各场景的
+`checks.length` 求和 —— 崩掉的场景一条 check 都没跑，贡献 **0 个失败**。
+
+```
+变异：在 records 场景首行注入 throw
+修前：合计：10 个场景，105 项断言，0 项失败
+      ✓ E2E 全部通过          EXIT 0     ← 一个场景彻底没执行，门禁照样绿
+修后：合计：1 个场景，0 项断言，0 项失败，1 个场景崩溃
+      ✗ 有 1 个场景没有跑完（其断言未执行，等于未验证）
+      ✗ E2E 存在失败           EXIT 1
+```
+
+> **规避**：`catch` 里除了记录，必须**同时置失败标志**。凡是「按成功项求和」
+> 的判据，都要问一句：少跑一项会让总数变小，还是会让失败数变大？
+> 变小就是漏洞。
+
+**乙、端口被谁占着都算通过（审计了别人的页面）**
+
+`perf.ts` 里 `if (res.ok) break;` —— 只要 4319 端口上有人回 200，就认为
+「自己的 preview 起来了」。用静态服务器在那个端口伺服一个假页面后：
+
+```
+修前：✓ 首屏可交互 /sandbox   20ms（三次 124 / 20 / 27）  0 项超预算 ✓   EXIT 0
+修后：✗ 端口 4319 已被占用，无法确认被测对象是自己的构建产物   EXIT 2
+```
+
+`a11y.ts` 同一个病，而且更隐蔽：它会在**别人的页面**上跑无障碍检查并报「通过」。
+更狠的手法是把 `lang` 改坏、同时在端口上挂一份**完好的** dist 副本 ——
+指纹校验挡不住这种，所以最终修法是**起服务前先探端口**（`assertPortFree`）。
+
+> **规避**：自起服务器的门禁，必须能证明「连上的是自己起的那个」。
+> 判据按强度排序：端口预检 > 构建产物指纹 > `response.ok`（最弱，等于没判）。
+
+**丙、预算写了但没有任何约束力**
+
+CONTRACT §7 写「首屏 ≤ 1500ms」，`perf.ts` 里 `HARD_LIMIT_MS = BUDGET_MS * 3`。
+于是 1574ms 的输出和 416ms 那次**长得一模一样**，都是 `✓ ... 0 项超预算` EXIT 0。
+
+```
+修前：✓ 首屏可交互 /sandbox  1574ms ... 判失败线 4500ms   0 项超预算 ✓   EXIT 0
+修后：三级判定 —— ≤1500 通过 / ≤3000 打 ⚠ 但 EXIT 0 / >3000 EXIT 1
+      ⚠ 首屏可交互 /sandbox  411ms  预算 300ms，已超预算  判失败线 600ms
+      ⚠ 超过 300ms 预算但未达 600ms 失败线：本次判通过，但这属于性能抖动
+      合计：1 项预算，0 项超预算（1 项超出预算但在容忍区间）   EXIT 0
+```
+
+> **规避**：文档里的每个数字都要能在代码里找到对应的判断分支。
+> 「写了阈值但不约束行为」比没有阈值更糟——它让人以为有保护。
+
+**丁、环境错误的退出码和真实失败混在一起**
+
+`perf.ts` 缺 `dist/` 时裸 `throw` → 最外层 `exit(1)`，而 `a11y.ts` / `smoke.ts`
+都是 `exit(2)`。CI 里「没构建」和「性能真退化」因此无法区分。
+
+```
+修前：EXIT 1（和性能退化同码）
+修后：✗ dist/index.html 不存在：先跑 `npm run build`（退出码 2…）  EXIT 2
+```
+
+> **规避**：退出码是机器读的唯一信号。`1 = 被测对象有问题`，`2 = 环境不满足（压根没测）`，
+> 两者必须能分开。
+
+**戊、场景名里的「每个」没有兑现**
+
+`smoke.ts` 有个场景叫「全路由扫一遍：**每个**路由都能渲染」，它列了 12 条，
+而 `App.tsx` 有 15 条 —— 漏的正是所有动态路由
+（`/sandbox/session/:id`、`/sandbox/session/:id/report`、`/sandbox/clients/:id`、
+`/toolbox/:toolId`）。而且这条门禁**抓不住自己漏了**：
+
+```
+修前：12 条路由 → 36 项断言全绿
+修后：16 条路由 → 48 项断言；注入 /sandbox/session/（缺少 id）
+      ✗ /sandbox/session/ 命中真实路由（不是 404 兜底页）— 落到了 NotFoundPage
+      EXIT 1
+```
+
+> **规避**：清单类断言要从**唯一真相源**推导，或者在注释里写明「必须与 App.tsx 同步」。
+> 手写清单 + 名字里带「每个/全部/所有」= 迟早撒谎。
+> 顺带一提：`/toolbox/breathing` 这种「看着像真的」的 id 也会被 404 兜底页吞掉，
+> 直到你给列表项加一条「不得落到 NotFoundPage」的断言。
+
+**己、测试文件存在，但测的是别的东西**
+
+`docs/HANDOVER.md` 把计分引擎的门禁写成 `npx vitest run src/__tests__/`，
+跑出来 `Tests 41 passed EXIT 0` —— 但 `src/__tests__/` 里只有 `perf.test.ts`，
+grep `scoreScale|scoring|反向|危机` 一个都不命中。真测试在 `src/scales/scoring.test.ts`（65 条）。
+
+> **规避**：录门禁命令时，顺手 grep 一下它**跑的文件里**有没有被测对象的名字。
+> 「文件存在 + 命令能跑 + 结果是绿的」这三件事同时成立，也可能什么都没测。
+
+**庚、文档把守卫记在了错的门禁名下**
+
+`HANDOVER.md` 说主包体积「E2E 也断言了这点」，但 `smoke.ts` 里提到 gzip 的
+只有一句**注释**，真正的断言在 `src/__tests__/perf.test.ts`。
+
+> **规避**：写「由 X 验证」时，去 X 里搜一眼那个判据。记错门禁名比不写更糟 ——
+> 有人想确认「体积真被守住了」时会去看 X，然后什么也找不到，最后还是选择相信文档。
+
 ---
 
 ## 5. 棘轮基线（a11y）
+
+> **现状（v2.0）**：基线已收窄到 **`entries: []`**，当前审计 **critical 0 / warning 0**。
+> 下面「287 项存量问题」是棘轮机制**建立时**的历史记录，保留它是为了说明
+> 这套机制为什么这么设计；不要据此以为现在还有 287 条债。
 
 ### 问题
 
@@ -578,13 +692,18 @@ v2.0 加了第 8 个笔刷（`flatten`）时就红了 —— 而加笔刷是功�
 
 ## 6. 已知缺口与已确认的缺陷
 
-### 6.1 `it.fails` 锁定的缺陷（4 个，非跳过）
+### 6.1 曾经的 `it.fails`：**已全部转正（现存 0 个）**
 
-每个 `it.fails` 都带注释说明根因与修法。**修好后请改成 `it`**，不要删掉。
+> 全仓库 grep `it.fails` 现在是 **0 个**。下面这 4 条曾用 `it.fails` 锁定，
+> 缺陷修完后已逐个改成普通的 `it`。留表是为了记录「这条债曾经存在过」。
+>
+> ⚠️ 本节标题原写「`it.fails` 锁定的缺陷（4 个，非跳过）」——那是旧状态。
+> 一个说「有 4 个 fails」的文档，会让人去找 `it.fails` 然后一个都找不到，
+> 反过来怀疑测试文件丢了。
 
-| 位置 | 缺陷 | 修法 |
+| 位置 | 曾经的缺陷 | 修法（已落地） |
 |---|---|---|
-| `storage.test.ts` | `add()` 在配额失败时返回 `undefined`，调用方无法感知写入失败（HANDOVER §3 P1 要求失败回调 + toast） | 返回 `{ ok, error }` 并在 UI 弹提示 |
+| `storage.test.ts` | `add()` 在配额失败时返回 `undefined`，调用方无法感知写入失败 | 返回 `{ ok, error }` 并在 UI 弹提示 |
 | `storage.test.ts` | 配额抛错后内存快照含新记录、磁盘为 `null` —— UI 显示已保存，刷新丢失 | 写失败时回滚内存状态 |
 | `storage.test.ts` | `storage` 事件只 `emit` 不 `invalidate`，跨标签页同步视觉上失效 | 一行：`invalidate(e.key); emit(e.key);` |
 | `format.test.ts` | 隐私检查只扫 `session.meta`，`items[0].name` 这类泄漏不会被拦 | 把 `FORBIDDEN_FIELDS` 检查扩到 items / events.payload / 顶层 |
@@ -621,43 +740,72 @@ v2.0 加了第 8 个笔刷（`flatten`）时就红了 —— 而加笔刷是功�
 
 ---
 
-## 7. CI 建议
+## 7. CI
 
-当前没有 CI（可选交付项）。建议最小可用版本：
+**已有 CI**：`.github/workflows/quality.yml`（Windows runner，Node 22）。
+本节原来的标题是「CI 建议」，正文写「当前没有 CI（可选交付项）」——
+只要没有 CI，所有门禁的最终执行者都只有「自觉」，
+而审计已经证明「没人跑的门禁等于不存在」：
+`perf.ts` 的判失败线松到 3× 预算、`smoke.ts` 场景崩溃会假绿，
+两处都活了很久，因为从没人在干净环境里跑过它们。
+
+CI 的步骤顺序就是 `package.json` 里 `check` 的顺序，两者必须同步改。
+当前步骤：
 
 ```yaml
 name: quality
-on: [push, pull_request]
+on:
+  push: { branches: [main] }
+  pull_request:
+  workflow_dispatch:
 jobs:
   check:
-    runs-on: windows-latest     # 项目在 Windows 上开发，保持一致
+    runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+        with: { node-version: '22', cache: npm }
       - run: npm ci
 
-      # 类型（用 --noEmit 即可；见上文说明，--force 并非必需）
+      # ---- 类型（不需要 --force）----
       - run: npx tsc -b --noEmit
+      - run: npx tsc -p tsconfig.scripts.json --noEmit
 
-      # 构建必须先于 vitest / E2E / a11y / perf —— 体积预算与三个审计都读 dist/
+      # ---- 构建：必须先于 vitest / E2E / a11y / perf，它们都读 dist/ ----
       - run: npx vite build
 
-      # 必须在 build 之后：perf.test.ts 的体积预算依赖 dist/
+      # ---- 测试 ----
       - run: npx vitest run
+      - run: node --experimental-strip-types --no-warnings scripts/validate-session.ts samples/example.sandplay.json
 
+      # 校验器必须能拒绝坏样例：只测「接受」不测「拒绝」等于只测了一半
+      - name: 格式校验器（拒绝坏样例）
+        shell: bash
+        run: |
+          set +e
+          node --experimental-strip-types --no-warnings scripts/validate-session.ts samples/broken.sandplay.json
+          code=$?
+          if [ "$code" -eq 1 ]; then echo "✓ 正确拒绝（退出码 1）"; else echo "✗ 退出码 $code，期望 1"; exit 1; fi
+
+      # ---- 真浏览器门禁 ----
       - run: node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts
       - run: node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
       - run: node --experimental-strip-types --no-warnings scripts/audit/perf.ts
 
-      # scripts/ 的独立类型检查（tsconfig.scripts.json 就是干这个的）
-      - run: npx tsc -p tsconfig.scripts.json --noEmit
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: e2e-screenshots
           path: scripts/e2e/screenshots/
+          if-no-files-found: ignore
 ```
+
+> ⚠️ **别在 CI 里给构造函数传 `--`。** `npm run validate -- samples/x.json`
+> 里的 `--` 是 **npm 的分隔符**，npm 会把它剥掉再传参，所以能跑通；
+> 但在 CI 里直接写 `node scripts/validate-session.ts -- samples/x.json`
+> 会因为 `--` 被当成未知选项而报 `参数错误：无法识别的选项：--` 并退出 2。
+> 我第一版 CI 就是这么写错的，幸好本地跑了一遍才发现。
 
 注意事项：
 

@@ -634,6 +634,18 @@ const scenarios: Scenario[] = [
     id: 'routes-sweep',
     name: '全路由扫一遍：每个路由都能渲染（不白屏）',
     run: async (page, _errors, _requests) => {
+      /*
+       * 这份清单必须与 `src/App.tsx` 的 `<Route path=...>` 一一对应。
+       *
+       * 原来它是手写的 12 条，而 App.tsx 里有 15 条路由 ——
+       * 漏掉的正是那些动态路由：/sandbox/session/:id、
+       * /sandbox/session/:id/report、/sandbox/clients/:id、/toolbox/:toolId。
+       * 于是这个场景明明叫「每个路由都能渲染」，三条动态路由却从没被验证过。
+       *
+       * 动态路由用不存在的 id 填：数据不存在时页面应当渲染体面的「找不到」
+       * 提示而不是白屏，那本身也是要验的行为，所以不预先造数据。
+       * 注意 `*` 兜底路由不在此列 —— 它的行为由 `check-routes.mjs` 的 404 项覆盖。
+       */
       const routes = [
         '/',
         '/scales',
@@ -642,9 +654,13 @@ const scenarios: Scenario[] = [
         '/sandbox',
         '/sandbox/compare',
         '/sandbox/clients',
+        '/sandbox/clients/demo-nonexistent',
+        '/sandbox/session/demo-nonexistent',
+        '/sandbox/session/demo-nonexistent/report',
         '/records',
         '/safety',
         '/toolbox',
+        '/toolbox/breathing-478',
         '/resources',
         '/about',
       ];
