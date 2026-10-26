@@ -16,7 +16,7 @@
 | 生产构建 | ✅ 通过 | `npx vite build` |
 | 主包体积 | ✅ gzip **140.7 kB**（预算 175 kB） | 看上一条输出的 `index-*.js` |
 | 单元测试 | ✅ 17 文件 / 546 用例全绿 | `npx vitest run` |
-| E2E 冒烟 | ✅ 10 场景 / **120 断言** | `node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts` |
+| E2E 冒烟 | ✅ 11 场景 / **141 断言** | `node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts` |
 | 无障碍审计 | ✅ critical 0 / warning 0 / exit 0 | `npx vite build && node --experimental-strip-types --no-warnings scripts/audit/a11y.ts` |
 | 首屏可交互 | ✅ 常态 408–456ms（预算 1500ms，失败线 3000ms） | `npm run perf`（需先 `npm run build`） |
 | 格式校验器 | ✅ 通过 | `node --experimental-strip-types --no-warnings scripts/validate-session.ts samples/example.sandplay.json` |

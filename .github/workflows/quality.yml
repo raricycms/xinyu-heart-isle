@@ -70,6 +70,12 @@ jobs:
       - name: E2E 冒烟
         run: node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts
 
+      # 移动端 390px 场景的断言也要被验证：注入「500px 宽元素」和
+      # 「8×8px 按钮」，要求分别被抓到。第一版断言用 innerWidth 做基准，
+      # 而它会跟着溢出内容一起变大（390→501），断言恒真 —— 正是这一步发现的。
+      - name: E2E 移动端规则自检（注入缺陷必须被抓到）
+        run: node scripts/audit/e2e-self-test.mjs
+
       - name: 无障碍审计
         run: node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
 

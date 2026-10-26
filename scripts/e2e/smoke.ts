@@ -28,7 +28,7 @@
  * 退出码：0 = 全通过，1 = 有失败。
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -55,6 +55,20 @@ const filter = argv.find((arg) => !arg.startsWith('--'));
 const PORT = Number((argv.find((arg) => arg.startsWith('--port=')) ?? '--port=4173').split('=')[1]);
 const BASE = `http://127.0.0.1:${PORT}`;
 const SHOT_DIR = path.resolve(process.cwd(), 'scripts/e2e/screenshots');
+
+/**
+ * 跑哪个构建产物。默认 `dist`。
+ *
+ * 设 `XINYU_E2E_DIST` 可指向副本 —— 专供**变异测试**（`tmp/mutate-mobile.mjs`）：
+ * 把 dist 复制到 `tmp/mut-dist/` 再注入缺陷，工作区的 `dist/` 全程只读。
+ *
+ * 这条约束是踩坑换来的：a11y 的变异脚本曾经直接改 `dist/index.html`，
+ * 恢复时与并发的 `vite build` 撞车，导致后续审计读到过期 bundle 并假报
+ * 7 个不存在的缺陷。**变异测试必须跑在副本上。**
+ */
+const DIST_DIR = process.env.XINYU_E2E_DIST
+  ? path.resolve(process.env.XINYU_E2E_DIST)
+  : path.resolve(process.cwd(), 'dist');
 /** 单步兜底超时：任何一格卡住都不该让整个脚本吊死 */
 const STEP_TIMEOUT = 20_000;
 
@@ -99,15 +113,24 @@ function expectTrue(name: string, condition: unknown, detail?: string): boolean 
 /* -------------------------------------------------------------------------- */
 
 function startPreview(): ChildProcess {
-  const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const child = spawn(command, ['vite', 'preview', '--port', String(PORT), '--strictPort'], {
-    cwd: process.cwd(),
-    // Windows 上 npx 是 .cmd，必须走 shell 才能 spawn
-    shell: process.platform === 'win32',
-    stdio: 'ignore',
-    // 独立进程组，便于整组杀掉（vite preview 会再起子进程）
-    detached: false,
-  });
+  /*
+   * 和 a11y 一样：直接 spawn node + vite 入口 JS，不用 `npx.cmd` + shell。
+   *
+   * 原来这里走 `spawn('npx.cmd', ..., { shell: true })`，于是链路上有
+   * cmd.exe → npx → node → vite 四层。`taskkill /T` 能整组杀，但
+   * `child.kill()` 只杀 cmd.exe，中间层一变就漏。单进程没有这个问题。
+   *
+   * `--outDir` 让它服务指定的产物目录（变异测试用副本）。
+   */
+  const viteBin = path.join(process.cwd(), 'node_modules', 'vite', 'bin', 'vite.js');
+  if (!existsSync(viteBin)) {
+    throw new Error(`找不到 vite 入口：${viteBin}（先 npm install）`);
+  }
+  const child = spawn(
+    process.execPath,
+    [viteBin, 'preview', '--port', String(PORT), '--strictPort', '--outDir', DIST_DIR],
+    { cwd: process.cwd(), stdio: 'ignore', windowsHide: true },
+  );
   return child;
 }
 
@@ -133,6 +156,42 @@ function stopPreview(child: ChildProcess): void {
   } else {
     child.kill('SIGTERM');
   }
+}
+
+/**
+ * 已启动的 preview，供退出钩子兜底清理。
+ *
+ * 为什么需要：`process.exit()` **不会执行 `finally`**。
+ * 这个脚本里有 6 处 `process.exit`（缺 chrome、缺 dist、无匹配场景、
+ * 端口被占、以及正常收尾），任何一处提前退出都会让 preview 变成孤儿
+ * 继续占着 4173，下一次运行就报「端口已被占用」——而那个报错看起来
+ * 像环境问题，不像「自己没收拾干净」。
+ *
+ * a11y 审计踩过这个坑：泄漏只在**第二轮**显现，第一轮是绿的。
+ * Node 保证 `process.exit()` 会触发 `exit` 事件，所以挂在这里最可靠。
+ * 钩子里只能用**同步**操作：此刻事件循环已停，异步子进程根本不会跑起来。
+ */
+const livePreviews = new Set<ChildProcess>();
+let exitHookInstalled = false;
+
+function installExitHook(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on('exit', () => {
+    for (const child of livePreviews) {
+      if (child.exitCode !== null || child.killed) continue;
+      try {
+        if (process.platform === 'win32') {
+          spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+        } else {
+          child.kill('SIGKILL');
+        }
+      } catch {
+        /* 退出阶段尽力而为，不再抛 */
+      }
+    }
+    livePreviews.clear();
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -576,6 +635,180 @@ const scenarios: Scenario[] = [
   },
 
   /* ------------------------------------------------------------------ */
+  /*
+   * 移动端 390px 视口。
+   *
+   * 之前这一条只存在于 `scripts/dev/check-routes.mjs`（一个手工探针），
+   * 而 `docs/VISION.md` §7.4 把它列为 E2E 的验收要求 —— 也就是说
+   * 文档说「E2E 覆盖移动端」，实际 E2E 从头到尾都跑在 1440×900。
+   * 这正是幽灵门禁的标准形态：要求在表格里，执行在别处。
+   *
+   * 检查重点不是「好看」，而是**布局塌不塌**：
+   *   ① 不能出现横向滚动条（最典型的移动端布局 bug）
+   *   ② 不能有元素宽出视口（溢出到屏幕外 = 点不到）
+   *   ③ 关键内容仍在可视区内
+   *   ④ CONTRACT §7 要求每个页面都有 `@media (max-width: 640px)`，
+   *      这里顺手验证「确实有小屏适配」不是空话：视口变窄后
+   *      页面高度应当变大（内容被迫换行/堆叠），而不是原样缩放。
+   */
+  {
+    id: 'mobile-390',
+    name: '移动端 390px 视口：无横向溢出、无越界元素',
+    run: async (page, errors, _requests) => {
+      await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+
+      const routes = ['/', '/sandbox', '/records', '/toolbox/breathing-478', '/scales/phq-9'];
+      for (const route of routes) {
+        await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' });
+        const anchor = await waitAny(page, ['main']);
+        expectTrue(`${route} 在 390px 下渲染出 main`, anchor !== null);
+
+        // 等布局稳定：字体/图片加载会改变宽度
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              let last = '';
+              let same = 0;
+              const tick = (): void => {
+                const key = `${document.body.scrollWidth}x${document.body.scrollHeight}`;
+                same = key === last ? same + 1 : 0;
+                last = key;
+                if (same >= 3) resolve();
+                else setTimeout(tick, 150);
+              };
+              tick();
+            }),
+        );
+
+        const layout = await page.evaluate(() => {
+          /*
+           * ⚠️ 这里**不能**用 `window.innerWidth` 当基准。
+           *
+           * `isMobile: true` 时 Chrome 用**布局视口**语义，而布局视口会被
+           * 溢出的内容撑大：注入一个 500px 宽的 div 后，`window.innerWidth`
+           * 从 390 变成 501，于是 `scrollWidth > innerWidth` 永远 false。
+           * 断言在检查一个**必然自洽**的量 —— 标准的自证陷阱。
+           *
+           * 实测（注入 500px div 后）：
+           *   window.innerWidth: 501   ← 被内容撑大了
+           *   docElement.scrollWidth: 501 ← 与上一行恒等
+           *   注入元素的 right: 500    ← 实际超出 390 屏幕 110px
+           *
+           * 改用固定目标宽度：我们要验证的就是「在 390px 屏幕上」，
+           * 基准写死，而不是回头问浏览器「你现在有多宽」。
+           */
+          const TARGET_WIDTH = 390;
+          const viewportWidth = TARGET_WIDTH;
+          const docWidth = document.documentElement.scrollWidth;
+
+          /*
+           * 找出「越界」元素时必须排除**自己的滚动容器**。
+           *
+           * 第一版没排除，结果 /sandbox 的 `.ss-toolbar__group` 全部被判越界
+           * （最远一个是 left 751 / right 1077，而视口才 391）。
+           * 但那是**有意设计**：`.ss-toolbar` 是 `overflow-x: auto` 的横向滚动
+           * 工具条，子元素本来就该排在视口之外等用户滑过去。
+           *
+           * 判据看错了会得到相反结论：真正的移动端 bug 是**页面级**横向滚动
+           * （`documentElement.scrollWidth > innerWidth`），而不是某个元素
+           * 在自己的滚动容器里横向排布。实测该页 docWidth == viewportWidth，
+           * 说明布局本身健康。
+           */
+          const inScrollContainer = (element: Element): boolean => {
+            let node: Element | null = element.parentElement;
+            while (node !== null && node !== document.body) {
+              const overflowX = getComputedStyle(node).overflowX;
+              if (overflowX === 'auto' || overflowX === 'scroll') return true;
+              node = node.parentElement;
+            }
+            return false;
+          };
+
+          const overflowing: string[] = [];
+          for (const element of document.body.querySelectorAll('*')) {
+            const box = element.getBoundingClientRect();
+            if (box.width === 0 || box.height === 0) continue;
+            if (box.right <= viewportWidth + 1) continue;
+            // 在可滚动容器里的元素不算越界（用户能滑到）
+            if (inScrollContainer(element)) continue;
+            // 若父元素也溢出，跳过（只报最外层的问题元素）
+            const parent = element.parentElement;
+            if (parent !== null && parent.getBoundingClientRect().right > viewportWidth + 1) continue;
+            const cls = typeof element.className === 'string' ? element.className : '';
+            overflowing.push(`${element.tagName.toLowerCase()}${cls ? '.' + cls.split(' ')[0] : ''}`);
+          }
+          return { docWidth, viewportWidth, overflowing: overflowing.slice(0, 5) };
+        });
+
+        expectTrue(
+          `${route} 无横向滚动`,
+          layout.docWidth <= layout.viewportWidth + 1,
+          `文档宽 ${layout.docWidth} > 视口 ${layout.viewportWidth}`,
+        );
+        expectTrue(
+          `${route} 无元素溢出视口右缘`,
+          layout.overflowing.length === 0,
+          layout.overflowing.join(', '),
+        );
+
+        /*
+         * 触摸目标：44px 是 CONTRACT §7 的硬约束，移动端才有意义。
+         *
+         * ⚠️ 这里的判据**必须**和 `scripts/audit/a11y.ts` 保持一致，否则会
+         * 出现「E2E 红、a11y 绿」这种最消耗信任的分裂。第一版我写得比 a11y
+         * 粗，报了 5 个页面失败，实际全是规则差异而不是产品缺陷：
+         *
+         *   ① `input`（搜索框、滑杆）— a11y 只查 checkbox/radio，
+         *      文本框和滑杆的高度由字号/浏览器决定，不是「按钮类」目标；
+         *   ② 行内文字链接（`a` 在句子里）— WCAG 2.5.5 明确豁免，
+         *      a11y 用 `display: inline && tagName === 'A'` 排除；
+         *   ③ `input(1×1)` — 那是视觉隐藏的 file input，被 `visible()` 过滤掉。
+         *
+         * 宁可少查一类，不要另立一套标准。真正的触摸目标审计在 a11y 里，
+         * 这里只做「移动端快速回归」，口径对齐即可。
+         */
+        const smallTargets = await page.evaluate(() => {
+          const selector =
+            'button, a[href], [role="button"], [role="tab"], input[type="checkbox"], input[type="radio"], select';
+          const visible = (element: Element): boolean => {
+            const box = element.getBoundingClientRect();
+            if (box.width === 0 || box.height === 0) return false;
+            const style = getComputedStyle(element);
+            return style.visibility !== 'hidden' && style.display !== 'none';
+          };
+          const bad: string[] = [];
+          for (const element of document.querySelectorAll(selector)) {
+            if (!visible(element)) continue;
+            if (element.getAttribute('aria-hidden') === 'true') continue;
+            // 行内文字链接豁免（与 a11y 审计同一条规则）
+            const style = getComputedStyle(element);
+            if (element.tagName === 'A' && style.display === 'inline') continue;
+            // 在自己的滚动容器里的元素不查（可能被部分遮住，尺寸无意义）
+            const box = element.getBoundingClientRect();
+            if (box.width < 44 - 1 || box.height < 44 - 1) {
+              const text = (element.textContent ?? '').trim().slice(0, 12);
+              bad.push(
+                `${element.tagName.toLowerCase()}(${Math.round(box.width)}×${Math.round(box.height)})「${text}」`,
+              );
+            }
+          }
+          return bad.slice(0, 5);
+        });
+        expectTrue(
+          `${route} 触摸目标 ≥ 44×44px`,
+          smallTargets.length === 0,
+          smallTargets.join(', '),
+        );
+      }
+
+      expectTrue('无 console.error', errors.length === 0, errors.join(' | '));
+
+      // 恢复默认视口，避免影响后续场景
+      await page.setViewport({ width: 1440, height: 900 });
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
   {
     id: 'deep-link-refresh',
     name: '深链接刷新（SPA fallback + base:"/"）：/sandbox/compare',
@@ -708,8 +941,8 @@ async function main(): Promise<void> {
     console.error('✗ 找不到 Chrome / Edge，无法跑 E2E。');
     process.exit(2);
   }
-  if (!existsSync(path.resolve(process.cwd(), 'dist/index.html'))) {
-    console.error('✗ 没有 dist/index.html，请先运行：npx vite build');
+  if (!existsSync(path.join(DIST_DIR, 'index.html'))) {
+    console.error(`✗ 没有 ${path.join(DIST_DIR, 'index.html')}，请先运行：npx vite build`);
     process.exit(2);
   }
 
@@ -728,6 +961,12 @@ async function main(): Promise<void> {
   console.log(`  场景：${selected.length} 个${filter ? `（筛选：${filter}）` : ''}\n`);
 
   const preview = startPreview();
+  /*
+   * 登记 + 装退出钩子：后面任何一处 `process.exit()` 都能收掉它，
+   * 不必依赖 `finally`（`process.exit` 会绕过 `finally`）。
+   */
+  livePreviews.add(preview);
+  installExitHook();
   let browser: Browser | undefined;
   let hardFailure = false;
 
@@ -798,6 +1037,8 @@ async function main(): Promise<void> {
     console.error(`\n✗ 运行环境错误：${String(error)}`);
   } finally {
     if (browser) await browser.close().catch(() => undefined);
+    // 先摘除登记，避免退出钩子重复处理同一个进程
+    livePreviews.delete(preview);
     stopPreview(preview);
     // 给 taskkill 一点时间落地
     await new Promise((resolve) => setTimeout(resolve, 400));

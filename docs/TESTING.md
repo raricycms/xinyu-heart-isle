@@ -128,12 +128,13 @@ node --experimental-strip-types --no-warnings scripts/audit/a11y.ts --update-bas
 
 `it.fails` 已**全部清零**（曾 4 条，对应 4 个已确认缺陷，全部修复后转正）。
 
-### E2E：10 场景 / 120 断言
+### E2E：11 场景 / 141 断言
 
-> 断言数以 `npm run e2e` 输出的「合计：10 个场景，N 项断言」为准。
-> 这里原写 107，实测 108；后来又补全了「全路由扫一遍」的动态路由
-> （`/sandbox/session/:id`、`/sandbox/session/:id/report`、`/sandbox/clients/:id`、
-> `/toolbox/:toolId`），断言数升到 120，覆盖 16 条路由。
+> 断言数以 `npm run e2e` 输出的「合计：11 个场景，N 项断言」为准。
+> 随着补齐覆盖，这个数字改过几次（107 → 108 → 120 → 141）：
+> 先是补全「全路由扫一遍」的动态路由（`/sandbox/session/:id`、
+> `/sandbox/session/:id/report`、`/sandbox/clients/:id`、`/toolbox/:toolId`），
+> 覆盖 16 条路由；后又新增**移动端 390px** 场景（21 项断言）。
 > 那个场景原名叫「每个路由都能渲染」但只列了 12 条，而 `App.tsx` 有 15 条——
 > 三条动态路由从没被验证过。**场景名里的「每个」是要能兑现的**。
 
@@ -147,8 +148,43 @@ node --experimental-strip-types --no-warnings scripts/audit/a11y.ts --update-bas
 | 沙面工具 | 8 | 7 个工具逐个点击 + 拖动，无 console 错误 |
 | 记录页 | 3 | 渲染 |
 | 安全页 | 5 | `tel:` 链接、12356、号码格式干净 |
+| **移动端 390px** | **21** | 5 条路由 × (无横向滚动 + 无越界元素 + 触摸目标 ≥44px) |
 | 深链接刷新 | 5 | `/sandbox/compare` 刷新后仍渲染、无 4xx 静态资源 |
-| 全路由扫描 | 36 | 12 条路由，**每条都验证不是 404 兜底页** |
+| 全路由扫描 | 36 | 16 条路由，**每条都验证不是 404 兜底页** |
+
+#### 移动端场景：断言写错的那个坑
+
+这个场景第一次跑出 6 项失败，其中 **5 项是我的判据错了，只有 0 项是产品缺陷**：
+
+- `/sandbox` 报「`.ss-toolbar__group` 溢出视口」→ 但 `.ss-toolbar` 是
+  `overflow-x: auto` 的**横向滚动**工具条，子元素本来就该排在视口外。判据必须
+  排除「在自己的滚动容器里」的元素。
+- 5 个页面报「触摸目标过小」→ 我的选择器比 `a11y.ts` 粗（把 `input` 文本框、
+  行内文字链接、1×1 隐藏 file input 都算进去了）。**两套标准 = 一个红一个绿**，
+  是最消耗信任的分裂。对齐 `a11y.ts` 的豁免规则后归零。
+
+更要紧的是**变异测试抓到了断言本身的 bug**：第一版用
+`documentElement.scrollWidth > window.innerWidth` 判横向溢出。注入一个
+500px 宽的 `div` 后：
+
+```
+window.innerWidth:      501   ← 被溢出内容撑大了（isMobile 的布局视口语义）
+documentElement.scrollWidth: 501   ← 与上一行恒等
+注入元素的 right:        500   ← 实际超出 390 屏幕 110px
+```
+
+基准会跟着被测对象一起变大，所以**这条断言永远不会红**。
+改成写死 `TARGET_WIDTH = 390` 之后，同一变异立刻被抓到：
+
+```bash
+node scripts/audit/e2e-self-test.mjs
+# M1 宽 500px 元素   → 命中「无横向滚动」=true exit=1 ✓
+# M2 8×8px 按钮      → 命中「触摸目标」=true   exit=1 ✓
+# 收尾（副本复原）    → exit=0 ✓
+```
+
+> 教训：**基准不能是被测对象自己的属性。** 这和「拿被测函数算出的期望值去断言它自己」
+> 是同一类错误，只是发生在布局层，肉眼看不出来。
 
 ### a11y：15 个路由，**全部清零**
 
