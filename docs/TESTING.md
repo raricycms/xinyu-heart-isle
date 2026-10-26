@@ -1099,6 +1099,74 @@ VISION §7.4 的性能一行要求「3D 路由、100 个摆件、帧率与内存
 
 ---
 
+### 4.10 死开关：字段存在 ≠ 功能存在
+
+`v2.0` 交付时，`Preferences.soundEnabled` 的样子是这样的：
+
+```ts
+// src/lib/types.ts
+soundEnabled?: boolean;     // 沙盘音效开关（沙声/落沙声）
+
+// src/lib/storage.ts
+soundEnabled: true,         // 默认开
+
+// 两套 i18n 都有
+'settings.sound': '沙的声音',   // zh-CN
+'settings.sound': 'Sand sounds', // en
+```
+
+**没有任何代码读过 `soundEnabled`。** 没有 UI 开关，没有音频实现。
+它比「没做」更糟：读代码的人会以为有声音；写测试的人会以为那行
+`default true` 有意义；做审计的人看到一个「已实现」的偏好字段。
+
+这是幽灵门禁的**字段版本**：门禁的形态不一定是断言，也可以是
+一个从不被读取的配置项。
+
+#### 怎么把它挖出来的
+
+不是靠读代码，是靠**反向搜索消费方**：
+
+```powershell
+# 搜索所有读 soundEnabled 的地方
+Get-ChildItem src -Recurse -Include *.ts,*.tsx |
+  Select-String -Pattern 'soundEnabled'
+# → 只有 2 处：默认值定义、类型定义。零处消费。
+```
+
+对照组是 `reducedMotion` —— 同样在 `Preferences` 里，但它有 **8 处**
+真实消费（`App.tsx` 写 `data-reduced-motion`、两个呼吸练习组件、
+`SandboxPage` 传给渲染器）。同一份文件里的两个字段，一个是真的，
+一个是死的。**对照搜索**比单点搜索更容易看出异常。
+
+#### 修法
+
+1. 实现：`src/sandbox/audio/sandSound.ts`，WebAudio 程序化合成，
+   零音频资产（真实沙声采样动辄几百 KB，会挤爆 gzip 175KB 预算，
+   且要进 `THIRD_PARTY_NOTICES.md` 资产台账）；
+2. UI：工作台顶栏一个 `aria-pressed` 按钮（本项目没有设置页）；
+3. 测试钉死三条契约（`sandSound.test.ts`，11 条）：
+   - 开关关闭时**一次都不建 AudioContext**（资源契约，不是行为契约）
+   - AudioContext 构造抛错时**不把异常抛给调用方**
+   - `dispose()` 后不再发声、重复 dispose 不抛错
+4. E2E 钉死「开关真的生效且持久化」（`smoke.ts` 沙盘交互场景 +3 断言）：
+   点一下 `aria-pressed` 必须变，**刷新后必须保持** ——
+   这一条才区分得开「写进偏好」和「只改了本地 state」。
+
+#### 变异验证
+
+| 变异 | 结果 |
+| --- | --- |
+| `createSandSound` 忽略 `enabled`，恒建 context | 单测 1 红 |
+| `dispose()` 里删掉 `disposed = true` | 单测 2 红 |
+| 按钮 `aria-pressed={true}` 恒真 | E2E 2 红 |
+
+第三条变异第一版被 **TypeScript** 抓到了（`noUnusedLocals`：删掉
+`setPreferences` 调用后它变成未使用导入），构建失败，E2E 实际跑的是
+旧 `dist`，所以**看起来绿**。差点把「构建挂了」误读成「断言没抓到」。
+变异测试必须确认构建成功，否则测的是上一个产物。
+
+---
+
 ## 5. 棘轮基线（a11y）
 
 > **现状（v2.0）**：基线已收窄到 **`entries: []`**，当前审计 **critical 0 / warning 0**。

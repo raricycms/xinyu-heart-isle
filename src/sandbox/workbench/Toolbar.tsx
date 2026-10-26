@@ -33,6 +33,9 @@ export interface ToolbarProps {
   onLock: () => void;
   onNew: () => void;
   sessionCount: number;
+  /** 沙声开关（VISION §5.1 P0，`Preferences.soundEnabled`） */
+  soundEnabled: boolean;
+  onSoundEnabledChange: (enabled: boolean) => void;
 }
 
 export function Toolbar({
@@ -54,6 +57,8 @@ export function Toolbar({
   onLock,
   onNew,
   sessionCount,
+  soundEnabled,
+  onSoundEnabledChange,
 }: ToolbarProps) {
   const { t } = useI18n();
 
@@ -128,6 +133,23 @@ export function Toolbar({
         </label>
 
         <div className="wb-iconbtn-group">
+          {/*
+            沙声开关（VISION §5.1 P0）。
+            为什么放在这里而不是"设置页"：本项目没有设置页，
+            而声音是「一边摆一边听」的即时偏好，放在工作台上就近可及。
+            `aria-pressed` 而不是把状态写在 label 里 —— 读屏要能听出当前开关态。
+          */}
+          <button
+            type="button"
+            className="wb-iconbtn"
+            data-testid="sandbox-sound-toggle"
+            aria-pressed={soundEnabled}
+            aria-label={t('settings.sound')}
+            title={`${t('settings.sound')}：${soundEnabled ? '开' : '关'}`}
+            onClick={() => onSoundEnabledChange(!soundEnabled)}
+          >
+            {soundEnabled ? '🔊' : '🔇'}
+          </button>
           <button
             type="button"
             className="wb-iconbtn" data-testid="sandbox-undo"

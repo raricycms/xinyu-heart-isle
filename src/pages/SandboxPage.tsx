@@ -3,12 +3,14 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Card } from '@/components/ui/Card';
 import { Notice } from '@/components/ui/Primitives';
 import { useToast } from '@/lib/toast';
-import { usePreferences } from '@/lib/storage';
+import { usePreferences, setPreferences } from '@/lib/storage';
 import { clamp } from '@/lib/utils';
 import { createId } from '@/lib/id';
 import { getSession, saveSession, useSessions } from '@/lib/sessionStore';
 import type { RendererKind, SandboxItem, SurfaceTool } from '@/lib/types';
 import { useSandboxSession } from '@/sandbox/useSandboxSession';
+import { createSandSound, SILENT_SAND_SOUND } from '@/sandbox/audio/sandSound';
+import type { SandSound } from '@/sandbox/audio/sandSound';
 import { replay } from '@/sandbox/events';
 import { forkSessionAt, parseResumeParams } from '@/sandbox/replay/resume';
 import { SandRendererSwitch } from '@/sandbox/render';
@@ -57,6 +59,23 @@ export default function SandboxPage() {
   const api = useSandboxSession({ initialMode: 'self' });
   /** 沙具包图片表：图片型沙具在沙盘上要画成图片，不能退化成占位符 */
   const packImages = usePackImageMap();
+
+  /*
+   * 沙声（VISION §5.1 P0：声音是触觉缺失的主要补偿）。
+   *
+   * 用 ref 持有控制器：声音是副作用，不该触发重渲染。
+   * 开关变化时重建，`dispose()` 关掉旧 context —— 否则切来切去
+   * 会攒下一堆音频线程。
+   */
+  const soundRef = useRef<SandSound>(SILENT_SAND_SOUND);
+  useEffect(() => {
+    const created = createSandSound(prefs?.soundEnabled ?? true);
+    soundRef.current = created;
+    return () => {
+      created.dispose();
+      soundRef.current = SILENT_SAND_SOUND;
+    };
+  }, [prefs?.soundEnabled]);
 
   /* ------------------------------ 本地 UI 状态 ------------------------------ */
 
@@ -166,13 +185,28 @@ export default function SandboxPage() {
         return;
       }
       const id = api.addItem(symbolId);
-      if (id) setSelectedId(id);
+      if (id) {
+        setSelectedId(id);
+        // 落沙声：用 symbolId 的哈希做种子，同一个沙具每次声音一致
+        let seed = 0;
+        for (let i = 0; i < symbolId.length; i += 1) seed = (seed * 31 + symbolId.charCodeAt(i)) >>> 0;
+        soundRef.current.drop(seed || 1);
+      }
     },
     [api, show, t],
   );
 
-  const handleItemDrag = useCallback(
-    (id: string, x: number, y: number) => {
+  /**
+   * 沙声开关。
+   *
+   * 写进偏好，`usePreferences` 会触发上面那个 effect 重建控制器 ——
+   * 关闭时 `createSandSound(false)` 返回 SILENT，且**不会建 AudioContext**。
+   */
+  const handleSoundEnabledChange = useCallback((enabled: boolean) => {
+    setPreferences({ soundEnabled: enabled });
+  }, []);
+
+  const handleItemDrag = useCallback(    (id: string, x: number, y: number) => {
       api.moveItem(id, clamp(x, 0, 1), clamp(y, 0, 1));
     },
     [api],
@@ -182,6 +216,9 @@ export default function SandboxPage() {
     (strokeTool: SurfaceTool, points: Array<{ x: number; y: number }>) => {
       if (api.locked) return;
       api.strokeSurface(strokeTool, points, radius, strength);
+      // 推沙声：力度与半径归一化成 0~1 的强度
+      const intensity = Math.min(1, (radius / 10) * 0.6 + (strength / 10) * 0.4);
+      soundRef.current.stroke(intensity, points.length);
     },
     [api, radius, strength],
   );
@@ -294,6 +331,8 @@ export default function SandboxPage() {
         onLock={() => setLockOpen(true)}
         onNew={handleNew}
         sessionCount={sessions.length}
+        soundEnabled={prefs?.soundEnabled ?? true}
+        onSoundEnabledChange={handleSoundEnabledChange}
       />
 
       {/*

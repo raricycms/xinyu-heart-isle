@@ -516,6 +516,44 @@ const scenarios: Scenario[] = [
         .catch(() => '');
       expectTrue('脏标记为 1', dirty.trim() === '1', `实际 "${dirty}"`);
 
+      /*
+       * 沙声开关（VISION §5.1 P0）。
+       *
+       * 这条断言的来历：`Preferences.soundEnabled` 曾经是个**死开关** ——
+       * 字段存在、默认 true、两套 i18n 文案齐备，但没有任何代码读过它。
+       * 所以这里不只断言「按钮存在」，还断言它**真的能切换并持久化**：
+       * 点一下 aria-pressed 必须变化，刷新后必须保持。
+       */
+      const soundBtn = await page.$('[data-testid="sandbox-sound-toggle"]');
+      if (!soundBtn) {
+        fail('沙声开关存在', '找不到 sandbox-sound-toggle');
+      } else {
+        const initial = await soundBtn.evaluate((node) => node.getAttribute('aria-pressed'));
+        expectTrue('沙声开关初始为开', initial === 'true', `aria-pressed="${initial}"`);
+
+        await soundBtn.click();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const afterToggle = await soundBtn.evaluate((node) => node.getAttribute('aria-pressed'));
+        expectTrue('点一下沙声开关后状态改变', afterToggle === 'false', `aria-pressed="${afterToggle}"`);
+
+        // 刷新后必须保持关闭 —— 证明写进了偏好，而不是只改了本地 state
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await withTimeout(
+          page.waitForSelector('[data-testid="sandbox-sound-toggle"]', { timeout: STEP_TIMEOUT }),
+          STEP_TIMEOUT + 2000,
+          '等待沙声开关（刷新后）',
+        );
+        const persisted = await page.$eval(
+          '[data-testid="sandbox-sound-toggle"]',
+          (node) => node.getAttribute('aria-pressed'),
+        );
+        expectTrue('沙声关闭状态已持久化', persisted === 'false', `刷新后 aria-pressed="${persisted}"`);
+
+        // 还原成开，避免影响后续场景
+        await page.click('[data-testid="sandbox-sound-toggle"]');
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+
       // 撤销可用 -> 点一下 -> 计数回落
       const undo = await page.$('[data-testid="sandbox-undo"]');
       if (undo) {
