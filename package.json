@@ -16,6 +16,7 @@
     "a11y": "node --experimental-strip-types scripts/audit/a11y.ts",
     "a11y:self-test": "node scripts/audit/meta-self-test.mjs",
     "e2e:self-test": "node scripts/audit/e2e-self-test.mjs",
+    "kbd:self-test": "node scripts/audit/keyboard-self-test.mjs",
     "perf": "node --experimental-strip-types scripts/audit/perf.ts",
     "validate": "node --experimental-strip-types scripts/validate-session.ts",
     "check": "npm run typecheck:all && npm run build && npm run test && npm run validate -- samples/example.sandplay.json && npm run e2e && npm run a11y && npm run perf"

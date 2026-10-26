@@ -356,9 +356,21 @@ export default function SandboxPage() {
               }
               onSelect={setSelectedId}
               onItemDrag={handleItemDrag}
-              onItemCommit={(id) => {
-                const item = items.find((entry) => entry.id === id);
-                if (item) api.commitMove(id, { x: item.x, y: item.y }, { x: item.x, y: item.y });
+              /*
+               * ⚠️ 必须把 `to` 传进去。原来这里写成
+               *   `onItemCommit={(id) => { ... commitMove(id, {x:item.x,y:item.y}, {x:item.x,y:item.y}) }}`
+               * 即只用 `id`，from/to 都取**当前坐标** —— 于是「移动」被提交成
+               * 一次原地不动的事件。拖动还能靠 `onItemDrag` 实时改坐标掩盖住，
+               * 但**键盘方向键微调完全没有中间态**，它唯一的落点就是这里：
+               * 按方向键 → 坐标算好了 → 提交成原地 → 位置不变。
+               *
+               * 结果是 dom2d 里那段 `handleKeyDown`（方向键 0.02 / Shift 0.1）
+               * 从来没真正生效过，而它是键盘用户调整摆件位置的**唯一**途径。
+               * 这个 bug 是 E2E 键盘全流程抓出来的：断言「方向键后 style.left 变了」
+               * 连续两次读到同一个 45%。
+               */
+              onItemCommit={(id, from, to) => {
+                api.commitMove(id, from, to);
               }}
               onItemActivate={(item) => setSelectedId(item.id)}
               onSurfaceStroke={handleSurfaceStroke}

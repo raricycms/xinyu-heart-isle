@@ -16,7 +16,7 @@
 | 生产构建 | ✅ 通过 | `npx vite build` |
 | 主包体积 | ✅ gzip **140.7 kB**（预算 175 kB） | 看上一条输出的 `index-*.js` |
 | 单元测试 | ✅ 17 文件 / 546 用例全绿 | `npx vitest run` |
-| E2E 冒烟 | ✅ 11 场景 / **141 断言** | `node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts` |
+| E2E 冒烟 | ✅ 12 场景 / **153 断言** | `node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts` |
 | 无障碍审计 | ✅ critical 0 / warning 0 / exit 0 | `npx vite build && node --experimental-strip-types --no-warnings scripts/audit/a11y.ts` |
 | 首屏可交互 | ✅ 常态 408–456ms（预算 1500ms，失败线 3000ms） | `npm run perf`（需先 `npm run build`） |
 | 格式校验器 | ✅ 通过 | `node --experimental-strip-types --no-warnings scripts/validate-session.ts samples/example.sandplay.json` |
@@ -30,6 +30,21 @@
 
 **一键跑全部门禁**：`npm run check`
 （= `typecheck:all` + `test` + `build` + `validate` + `e2e` + `a11y` + `perf`，7 条串起来，exit 0 即全绿）。
+
+**三条「门禁的自检」不在 `check` 里**（它们各自要跑 1–5 分钟，且需要先有 `dist`）：
+
+| 命令 | 验证什么 | CI |
+| --- | --- | --- |
+| `npm run a11y:self-test` | 无障碍规则本身有效：注入 6 类缺陷必须被抓到，roving tabindex 必须被豁免 | ✅ |
+| `npm run e2e:self-test` | 移动端 390px 断言有效：注入 500px 宽元素 / 8×8px 按钮必须被抓到 | ✅ |
+| `npm run kbd:self-test` | 键盘流程断言有效：让方向键失效必须被抓到 | ✅ |
+
+> 为什么要单独有这三个：**从没红过的断言不算门禁**。
+> `e2e:self-test` 第一版就抓到了自己的 bug（用 `window.innerWidth` 当基准，
+> 而 `isMobile` 下它会被溢出内容撑大，使断言恒真）；
+> `kbd:self-test` 对应的 `keyboard-flow` 场景上线即抓到 `onItemCommit`
+> 丢参数的实现缺陷（`tsc` 和 547 条单测都放行）。
+> 做法统一为：**把 `dist` 复制到 `tmp/`，在副本上注入缺陷，工作区全程只读。**
 
 > ⚠️ 这条命令曾经是「typecheck + test + build」三条，而 CONTRACT §7 里
 > 「首屏可交互」一行的验证方式写着 `scripts/audit/perf.ts` —— **那个文件从来不存在**，

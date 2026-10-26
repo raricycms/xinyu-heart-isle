@@ -76,6 +76,12 @@ jobs:
       - name: E2E 移动端规则自检（注入缺陷必须被抓到）
         run: node scripts/audit/e2e-self-test.mjs
 
+      # 键盘全流程场景抓到过一个真 bug：SandboxPage 的 onItemCommit 只用 id，
+      # from/to 都取当前坐标 → 方向键微调被提交成原地不动。
+      # tsc 放行（少写参数合法）、550 条单测放行，只有这条 E2E 会红。
+      - name: 键盘流程自检（注入缺陷必须被抓到）
+        run: node scripts/audit/keyboard-self-test.mjs
+
       - name: 无障碍审计
         run: node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
 

@@ -128,13 +128,14 @@ node --experimental-strip-types --no-warnings scripts/audit/a11y.ts --update-bas
 
 `it.fails` 已**全部清零**（曾 4 条，对应 4 个已确认缺陷，全部修复后转正）。
 
-### E2E：11 场景 / 141 断言
+### E2E：12 场景 / 153 断言
 
-> 断言数以 `npm run e2e` 输出的「合计：11 个场景，N 项断言」为准。
-> 随着补齐覆盖，这个数字改过几次（107 → 108 → 120 → 141）：
+> 断言数以 `npm run e2e` 输出的「合计：12 个场景，N 项断言」为准。
+> 随着补齐覆盖，这个数字改过几次（107 → 108 → 120 → 141 → 153）：
 > 先是补全「全路由扫一遍」的动态路由（`/sandbox/session/:id`、
 > `/sandbox/session/:id/report`、`/sandbox/clients/:id`、`/toolbox/:toolId`），
-> 覆盖 16 条路由；后又新增**移动端 390px** 场景（21 项断言）。
+> 覆盖 16 条路由；后又新增**移动端 390px** 场景（21 项）与
+> **键盘全流程**场景（12 项）。
 > 那个场景原名叫「每个路由都能渲染」但只列了 12 条，而 `App.tsx` 有 15 条——
 > 三条动态路由从没被验证过。**场景名里的「每个」是要能兑现的**。
 
@@ -149,8 +150,51 @@ node --experimental-strip-types --no-warnings scripts/audit/a11y.ts --update-bas
 | 记录页 | 3 | 渲染 |
 | 安全页 | 5 | `tel:` 链接、12356、号码格式干净 |
 | **移动端 390px** | **21** | 5 条路由 × (无横向滚动 + 无越界元素 + 触摸目标 ≥44px) |
+| **键盘全流程** | **12** | 聚焦沙具 → 方向键换格 → Enter 放入 → 方向键移动摆件 → 事件流增长 |
 | 深链接刷新 | 5 | `/sandbox/compare` 刷新后仍渲染、无 4xx 静态资源 |
 | 全路由扫描 | 36 | 16 条路由，**每条都验证不是 404 兜底页** |
+
+#### 键盘全流程：它抓到的真 bug，tsc 和单测都放行
+
+`SandboxPage` 原来这么传 `onItemCommit`：
+
+```tsx
+onItemCommit={(id) => {
+  const item = items.find((entry) => entry.id === id);
+  if (item) api.commitMove(id, { x: item.x, y: item.y }, { x: item.x, y: item.y });
+}}
+```
+
+只用 `id`，`from` / `to` 都填**当前坐标** → 「移动」被提交成原地不动。
+`dom2d` 的 `handleKeyDown` 明明算好了新坐标（方向键 0.02 / Shift 0.1），
+但唯一能落地的出口把它丢了。
+
+为什么长期没被发现：
+
+- **拖动路径掩盖了它** —— 拖动时 `onItemDrag` 实时改坐标，视觉上有反应；
+- **`tsc` 放行** —— 少写参数在 TypeScript 里合法，不报错；
+- **547 条单测放行** —— 单测测的是 `commitMove(id, from, to)` 这个函数本身，
+  它是对的，错的是调用点；
+- 只有键盘路径**没有中间态**，按了必须靠 `onItemCommit` 生效，于是完全失效。
+
+> 这是「单元测试全绿但功能是坏的」的典型案例：测了函数、没测接线。
+> 把原写法改回去，`npx tsc -b --noEmit` 依然 exit 0，而 E2E 立刻红：
+> `✗ 方向键移动了摆件（style.left 变了） — 之前 "left: 45%…"，之后 "left: 45%…"`。
+> 变异证据固化为 `scripts/audit/keyboard-self-test.mjs`。
+
+#### 键盘全流程的能力边界（别当成全覆盖）
+
+这条场景必须**先切到 `dom2d` 渲染器**才能走完，原因是一个真实缺口：
+
+| 渲染器 | 摆件形态 | 键盘能否移动已放置摆件 |
+|---|---|---|
+| `dom2d` | 真实 `<button>`，`tabIndex=0` | ✅ 方向键 0.02 / Shift 0.1 |
+| `iso2d`（默认） | `<canvas>` + `sr-only` 只读清单 | ❌ 无操作入口 |
+| `three` | WebGL canvas + 降级清单 | ❌ 无操作入口 |
+
+所以现状是：**键盘用户能做完整流程，但要先主动把渲染器切成「简洁平面」。**
+默认视图下只能用键盘放入摆件、无法调整位置。这个缺口已记入
+`CONTRACT.md` §7 的「部分自动化」一栏，不假装已覆盖。
 
 #### 移动端场景：断言写错的那个坑
 

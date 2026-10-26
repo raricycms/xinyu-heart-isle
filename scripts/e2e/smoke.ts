@@ -809,6 +809,161 @@ const scenarios: Scenario[] = [
   },
 
   /* ------------------------------------------------------------------ */
+  /*
+   * 键盘全流程：不用鼠标，从沙具库选一个沙具放进沙盘，再用方向键移动它。
+   *
+   * `docs/VISION.md` §7.4 把「键盘全流程」列为 E2E 验收要求，而此前
+   * E2E 里只有 1 处 `keyboard.press`（量表作答的 1–4 快捷键），
+   * 沙盘的键盘路径**从未被自动化验证** —— 但它在代码里是真实存在的
+   * （`SymbolTray` 的 roving tabindex + 方向键/Home/End/Enter，
+   * `dom2d` 的方向键微调 0.02 / Shift 0.1）。要求写了、实现写了、
+   * 验证没写，这就是半个幽灵。
+   *
+   * 这条场景的价值在于它验证的是**联动**：Tab 进网格 → 方向键移动焦点
+   * → Enter 放入 → 焦点落在新摆件上 → 方向键改变它的坐标。
+   * 任何一环断了都会红。
+   */
+  {
+    id: 'keyboard-flow',
+    name: '键盘全流程：Tab 进库 → 方向键 → Enter 放入 → 方向键移动',
+    run: async (page, errors, _requests) => {
+      await page.goto(`${BASE}/sandbox`, { waitUntil: 'domcontentloaded' });
+      const anchor = await waitAny(page, ['[data-testid="sandbox-stage"]', '[data-testid="sandbox-events"]']);
+      expectTrue('沙盘页渲染', anchor !== null);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      const readCount = async (): Promise<number> => {
+        const text = await page
+          .$eval('[data-testid="sandbox-item-count"]', (node) => node.textContent ?? '')
+          .catch(() => '0');
+        return Number(text.replace(/\D/g, '') || '0');
+      };
+      const before = await readCount();
+
+      /*
+       * ① 焦点进入沙具网格。
+       *
+       * 网格用的是 roving tabindex：整组只有当前项 tabindex=0，
+       * 所以直接 focus 那一项（比模拟 N 次 Tab 稳定，也不依赖页面
+       * 上到底有多少个可聚焦元素）。
+       */
+      const focused = await page.evaluate(() => {
+        const item = document.querySelector<HTMLElement>('[data-lib-item="true"][tabindex="0"]');
+        if (!item) return null;
+        item.focus();
+        return {
+          label: item.getAttribute('title') ?? item.textContent?.trim().slice(0, 12) ?? '',
+          isActive: document.activeElement === item,
+        };
+      });
+      expectTrue('沙具网格里有 tabindex=0 的可聚焦项（roving）', focused !== null);
+      expectTrue('能聚焦到该沙具', focused?.isActive === true, `焦点在 ${focused?.label}`);
+
+      // ② 方向键移动焦点（roving 生效：焦点换到另一个格子）
+      const movedByArrow = await page.evaluate(() => {
+        const active = document.activeElement as HTMLElement | null;
+        // 没有 data-symbol-id，用 title（= 沙具中文名）当身份标识
+        const startLabel = active?.getAttribute('title') ?? '';
+        active?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }),
+        );
+        const after = document.activeElement as HTMLElement | null;
+        return {
+          startLabel,
+          endLabel: after?.getAttribute('title') ?? '',
+          stillInGrid: after?.hasAttribute('data-lib-item') === true,
+        };
+      });
+      expectTrue('方向键后焦点仍在网格内', movedByArrow.stillInGrid === true);
+      expectTrue(
+        '方向键换了一个沙具（roving tabindex 真的在移动）',
+        movedByArrow.startLabel !== movedByArrow.endLabel,
+        `${movedByArrow.startLabel} → ${movedByArrow.endLabel}`,
+      );
+
+      // ③ Enter 放入沙盘
+      await page.evaluate(() => {
+        const active = document.activeElement as HTMLElement | null;
+        active?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+        );
+      });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const afterEnter = await readCount();
+      expectTrue('Enter 把沙具放进了沙盘', afterEnter === before + 1, `${before} → ${afterEnter}`);
+
+      // ④ 焦点到摆件上，方向键改变坐标
+      /*
+       * ⚠️ 这里必须先切到 `dom2d` 渲染器，原因是一个**真实的能力缺口**：
+       *
+       * 默认渲染器是 `iso2d`（2.5D 轴测），摆件画在 `<canvas>` 上，
+       * 只额外提供一个 `sr-only` 的 `role="list"` 摆件清单 —— **纯文本，不可操作**。
+       * 「方向键移动摆件」的 `handleKeyDown` 只存在于 `dom2d.tsx`，
+       * 在 iso2d 下键盘用户**无法调整已放置摆件的位置**。
+       *
+       * 所以完整的键盘流程是这样的：工具栏的渲染器 `<select>` 本身就是
+       * 原生控件（键盘可达）→ 选「DOM（无障碍）」→ 摆件变成真实 DOM 按钮
+       * → 方向键微调。能力存在，但**默认视图里没有**。
+       *
+       * 这条限制已记入 docs/TESTING.md 与 CONTRACT §7，不假装已覆盖。
+       */
+      const switched = await page.evaluate(() => {
+        const select = Array.from(document.querySelectorAll<HTMLSelectElement>('select')).find((node) =>
+          Array.from(node.options).some((option) => option.value === 'dom2d'),
+        );
+        if (!select) return null;
+        select.focus();
+        select.value = 'dom2d';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return { focused: document.activeElement === select, options: select.options.length };
+      });
+      expectTrue('渲染器选择框键盘可达且含 dom2d', switched !== null, `选项数 ${switched?.options}`);
+      expectTrue('渲染器选择框能聚焦', switched?.focused === true);
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      const itemKeys = await page.evaluate(() => {
+        const item = document.querySelector<HTMLElement>('.dom2d__item');
+        if (!item) return null;
+        item.focus();
+        const before = item.getAttribute('style') ?? '';
+        item.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }),
+        );
+        return { focused: document.activeElement === item, styleBefore: before };
+      });
+      expectTrue('切到 dom2d 后摆件是真实 DOM 且可聚焦', itemKeys?.focused === true);
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const styleAfter = await page
+        .evaluate(() => {
+          const item = document.querySelector<HTMLElement>('.dom2d__item');
+          return item?.getAttribute('style') ?? '';
+        })
+        .catch(() => '');
+      expectTrue(
+        '方向键移动了摆件（style.left 变了）',
+        itemKeys !== null && styleAfter !== itemKeys.styleBefore,
+        `之前 "${itemKeys?.styleBefore}"，之后 "${styleAfter}"`,
+      );
+
+      /*
+       * ⑤ 键盘操作也要产生事件（否则「可回放」在键盘路径上是空的）
+       */
+      const eventCountText = await page
+        .$eval('[data-testid="sandbox-event-count"]', (node) => node.textContent ?? '')
+        .catch(() => '');
+      expectTrue(
+        '键盘操作也写入了事件流',
+        Number(eventCountText.replace(/\D/g, '') || '0') > 0,
+        `事件数 "${eventCountText}"`,
+      );
+
+      expectTrue('无 console.error', errors.length === 0, errors.join(' | '));
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
   {
     id: 'deep-link-refresh',
     name: '深链接刷新（SPA fallback + base:"/"）：/sandbox/compare',

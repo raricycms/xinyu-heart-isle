@@ -261,7 +261,7 @@ import { coerceSession, migrateSnapshot } from '@/format/migrate';
 | `replayAll` 4000 事件 | ≤ 60ms | 单元测试（实测 1.3ms） |
 | `computeSessionStats` 4000 事件 | ≤ 30ms | 单元测试（实测 1.3ms） |
 | 触摸目标 | ≥ 44×44px | `scripts/audit/a11y.ts` |
-| 键盘可达 | 沙盘全部操作可用键盘 | **部分自动化**：`a11y.ts` 的 `keyboard-unreachable` 覆盖 15 条路由（检查交互元素是否在 Tab 序内，有变异证据）；**但「操作逻辑本身可用键盘完成」仍需手工核查** —— `smoke.ts` 只覆盖量表作答的 1–4 快捷键，沙盘的完整键盘流程（方向键移动、Enter 摆放）无自动化覆盖 |
+| 键盘可达 | 沙盘全部操作可用键盘 | **大部分自动化，有一处真实缺口**：`a11y.ts` 的 `keyboard-unreachable` 覆盖 15 条路由（检查交互元素是否在 Tab 序内，有变异证据）；`smoke.ts` 的 `keyboard-flow` 场景（12 断言）覆盖完整键盘流程：聚焦沙具库 → 方向键换格 → Enter 放入 → 方向键调整摆件位置 → 事件流写入。变异证据见 `scripts/audit/keyboard-self-test.mjs`。**缺口**：该流程只在 `dom2d` 渲染器下成立；默认的 `iso2d` 把摆件画在 `<canvas>` 上，仅提供 `sr-only` 只读清单，**键盘无法调整已放置摆件的位置**（`three` 同理）。即：键盘能完成全流程，但需先主动切换渲染器。 |
 | 对比度 | 正文 ≥ 4.5:1 | `scripts/audit/a11y.ts` |
 
 
