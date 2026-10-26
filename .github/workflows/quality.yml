@@ -91,6 +91,15 @@ jobs:
       - name: 视觉回归自检（注入缺陷必须被抓到）
         run: node scripts/audit/visual-self-test.mjs
 
+      # VISION §7.4 性能一行要求「100 个摆件 / 帧率」，此前从未断言。
+      # 这里量 100 / 400 摆件的单帧绘制开销（不量 rAF 帧间隔 ——
+      # 按需重绘的页面上那是 Chrome 合成器的空转节奏，恒真）。
+      - name: 渲染性能（100 / 400 摆件）
+        run: node scripts/render-perf.mjs
+
+      - name: 渲染性能自检（注入缺陷必须被抓到）
+        run: node scripts/audit/render-perf-self-test.mjs
+
       - name: 无障碍审计
         run: node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
 

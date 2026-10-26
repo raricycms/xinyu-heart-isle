@@ -1039,6 +1039,66 @@ export async function launchPreview({ port, distDir = 'dist', cwd } = {}) {
 
 ---
 
+### 4.9 渲染性能：别用 rAF 帧间隔去断言帧率
+
+VISION §7.4 的性能一行要求「3D 路由、100 个摆件、帧率与内存」。
+最直觉的写法是量 `requestAnimationFrame` 的帧间隔然后要求 ≥30fps。
+**实测证明那个断言是恒真的**：
+
+```
+100 个摆件在场，同一页面连续 5 轮 × 120 帧
+  第 1 轮  中位 6.0ms  p95 6.1ms  ≈166.7fps
+  第 2 轮  中位 6.0ms  p95 6.1ms  ≈166.7fps
+  ...
+  第 5 轮  中位 6.0ms  p95 6.6ms  ≈166.7fps
+  中位数跨度：0ms
+```
+
+`iso2d` 是**按需重绘**（`useEffect` 里画一次），稳态下根本没有 rAF 循环。
+6.0ms 是 headless Chrome 合成器的空转节奏，换台慢十倍的机器还是 6.0ms。
+拿它证明「移动端 ≥30fps」等于什么都没证明。
+
+#### 改成断言什么
+
+`scripts/render-perf.mjs`（`npm run perf:render`，已进 `npm run check`）
+量的是**一帧画完要多少 CPU 时间**：100 / 400 个摆件，各 30 次采样，取 p95。
+
+| 摆件数 | 实测 p95 | 占 30fps 单帧预算（33.3ms） |
+| --- | --- | --- |
+| 100 | 0.4ms | 1% |
+| 400 | 2.4ms | 7% |
+
+断言线是 **8ms**，不是 33.3ms —— 一帧里还有沙面绘制、命中测试、React 更新，
+给同帧其他工作留 4× 余量。
+
+还有一条**标度断言**：摆件数 4 倍时耗时增长必须 < 20 倍。绝对值受机器速度
+影响，标度不受。如果哪天有人把绘制写成 O(n²)（比如每个摆件都重排整个数组），
+绝对值可能仍在预算内，标度会先崩。
+
+#### 三个容易踩的坑（都真实踩过）
+
+1. **`ctx.fill()` 之后立刻 `performance.now()` 量到的不是绘制耗时**。
+   canvas 命令只是入队，真正光栅化是异步的。必须加一句
+   `ctx.getImageData(0, 0, 1, 1)` 强制同步结算，否则量到的是微秒级的
+   「入队时间」，断言恒绿。
+2. **变异注入的时机会晚于读取**。自检第一版用 `setTimeout(..., 1500)`
+   改 DOM，而门禁在 1200ms 就读取了 —— 变异发生在读取之后，稳定地
+   「抓不到」。变异脚本自己的时序错误和被测代码的缺陷长得一模一样，
+   都是「断言没红」。改成持续轮询。
+3. **破坏性正则匹配不到那段 DOM**。自检第二版按文本节点匹配
+   `/\d+\s*件在场/`，还是抓不到。实测那段 DOM 是
+   `<span>100</span><span> 件在场</span>` —— 数字和文字在**两个不同的
+   文本节点**里，任何单节点上的正则都永远匹配不到。改成按叶子元素的
+   `textContent` 改。
+
+#### 边界
+
+不覆盖 `three`（WebGL）：headless 下走 SwiftShader 软渲染，数字与真机
+无可比性。不覆盖内存：`performance.memory` 需要 Chromium 私有 flag 且
+波动极大，做门禁会变成随机红灯。
+
+---
+
 ## 5. 棘轮基线（a11y）
 
 > **现状（v2.0）**：基线已收窄到 **`entries: []`**，当前审计 **critical 0 / warning 0**。
@@ -1106,6 +1166,13 @@ export async function launchPreview({ port, distDir = 'dist', cwd } = {}) {
 - **样式与视觉**：有视觉回归门禁（`scripts/visual-regression.mjs`，见 §4.8），
   但它判的是**确定性**而不是「和基线图比」，所以**抓不到纯视觉漂移**
   （比如重构后整体偏移 2px、配色微调）。这类改动仍然只能靠人看。
+- **3D 渲染器的运行时性能**：`three`（WebGL）路径没有性能断言。headless
+  下 WebGL 走 SwiftShader 软渲染，帧时间比真机差一到两个数量级，
+  断言它只会产出误导性的绿或误导性的红。`iso2d`（默认渲染器）的
+  100 / 400 摆件绘制开销有门禁（`scripts/render-perf.mjs`）。
+- **内存**：没有内存断言。`performance.memory` 需要 Chromium 私有 flag，
+  波动极大，做成门禁会退化成随机红灯。泄漏特征由
+  `brush.perf.test.ts` 的「后段不得比前段慢 3 倍」间接守。
 - **跨浏览器**：只在 Chrome 跑过。Safari / Firefox 未验证。
 - **读屏实际体验**：a11y 审计是静态规则检查，不等于 NVDA / VoiceOver 实测。
 - **键盘全流程**：量表作答的 1–4 快捷键有单测；沙盘全键盘操作已进 E2E
@@ -1187,6 +1254,8 @@ jobs:
       - run: node scripts/audit/keyboard-self-test.mjs     # 键盘断言有效
       - run: node scripts/visual-regression.mjs            # 视觉回归（§4.8）
       - run: node scripts/audit/visual-self-test.mjs       # 视觉断言有效
+      - run: node scripts/render-perf.mjs                  # 100/400 摆件绘制（§4.9）
+      - run: node scripts/audit/render-perf-self-test.mjs  # 渲染性能断言有效
       - run: node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
       - run: node scripts/audit/meta-self-test.mjs         # a11y 规则有效
       - run: node --experimental-strip-types --no-warnings scripts/audit/perf.ts

@@ -31,7 +31,7 @@
 **一键跑全部门禁**：`npm run check`
 （= `typecheck:all` + `test` + `build` + `validate` + `e2e` + `a11y` + `perf`，7 条串起来，exit 0 即全绿）。
 
-**四条「门禁的自检」不在 `check` 里**（它们各自要跑 1–5 分钟，且需要先有 `dist`）：
+**五条「门禁的自检」不在 `check` 里**（它们各自要跑 1–5 分钟，且需要先有 `dist`）：
 
 | 命令 | 验证什么 | CI |
 | --- | --- | --- |
@@ -39,6 +39,7 @@
 | `npm run e2e:self-test` | 移动端 390px 断言有效：注入 500px 宽元素 / 8×8px 按钮必须被抓到 | ✅ |
 | `npm run kbd:self-test` | 键盘流程断言有效：让方向键失效必须被抓到 | ✅ |
 | `npm run visual:self-test` | 视觉回归断言有效：注入随机噪点 / 擦掉画面必须被抓到 | ✅ |
+| `npm run perf:render:self-test` | 渲染性能断言有效：摆件数不符 / 绘制被拖慢必须被抓到 | ✅ |
 
 > 为什么要单独有这几个：**从没红过的断言不算门禁**。
 > `e2e:self-test` 第一版就抓到了自己的 bug（用 `window.innerWidth` 当基准，
@@ -48,6 +49,9 @@
 > `visual:self-test` 抓到的不是被测代码，而是工具本身 ——
 > `launchPreview` 的 `distDir` 参数**只用于存在性检查、从未传给 vite**，
 > 于是所有变异测试实际都在测默认 `dist/`，稳定地「抓不到问题」。
+> `perf:render:self-test` 两版都「抓不到」，原因都在自检脚本自己身上：
+> 注入时机晚于读取、以及按文本节点匹配不到
+> `<span>100</span><span> 件在场</span>` 这种跨节点文本。
 > 做法统一为：**把 `dist` 复制到 `tmp/`，在副本上注入缺陷，工作区全程只读。**
 
 > ⚠️ 这条命令曾经是「typecheck + test + build」三条，而 CONTRACT §7 里
