@@ -61,6 +61,7 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { resolve as pathResolve } from 'node:path';
 import { createServer } from 'node:net';
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -250,6 +251,16 @@ export async function waitForServer(child, url, timeoutMs = 25000) {
 /**
  * 起一个 preview 并等到就绪 —— 大部分探针脚本只需要这一个入口。
  * 返回 `{ child, port, base, close }`。**调用方必须 `await close()`**。
+ *
+ * ⚠️ `distDir` 必须真的传给 vite（`--outDir`），不能只用来做存在性检查。
+ *
+ * 历史缺陷：这个函数的 `distDir` 参数**只被 `existsSync` 用了一次**，
+ * 然后 `startPreview({ port, cwd })` 根本没把它传下去 —— vite preview
+ * 永远服务默认的 `dist/`。于是：
+ *   · 变异测试传 `tmp/mut-dist-xxx`，检查通过了，但**实际测的还是 `dist`**；
+ *   · 注入的缺陷从没被加载，变异测试稳定地「抓不到」任何问题；
+ *   · 而它失败时的报错会是「断言没命中」，看起来像被测代码的问题。
+ * 一个静默忽略的参数，比没有这个参数更危险：调用方以为自己控制住了。
  */
 export async function launchPreview({
   port: preferred,
@@ -257,11 +268,15 @@ export async function launchPreview({
   distDir = 'dist',
   cwd = process.cwd(),
 } = {}) {
-  if (!existsSync(join(cwd, distDir))) {
+  // 注意：这里必须用 path.resolve 而不是解构出来的 resolve ——
+  // 同文件里 `sleep` / `waitForServer` 的 Promise 回调参数也叫 resolve，
+  // 虽然作用域不冲突，但读代码的人要多想一秒。
+  const resolvedDist = pathResolve(cwd, distDir);
+  if (!existsSync(resolvedDist)) {
     throw new Error(`找不到 ${distDir}/，请先跑 \`npx vite build\``);
   }
   const port = await pickFreePort(preferred);
-  const child = startPreview({ port, cwd });
+  const child = startPreview({ port, cwd, extraArgs: ['--outDir', resolvedDist] });
   const base = `http://127.0.0.1:${port}`;
   try {
     const ready = await waitForServer(child, `${base}/`, timeoutMs);

@@ -78,9 +78,18 @@ jobs:
 
       # 键盘全流程场景抓到过一个真 bug：SandboxPage 的 onItemCommit 只用 id，
       # from/to 都取当前坐标 → 方向键微调被提交成原地不动。
-      # tsc 放行（少写参数合法）、550 条单测放行，只有这条 E2E 会红。
+      # tsc 放行（少写参数合法）、547 条单测放行，只有这条 E2E 会红。
       - name: 键盘流程自检（注入缺陷必须被抓到）
         run: node scripts/audit/keyboard-self-test.mjs
+
+      # 视觉回归（3 场景 × 2 次渲染逐像素比对，见 docs/TESTING.md §4.8）
+      - name: 视觉回归
+        run: node scripts/visual-regression.mjs
+
+      # 视觉回归的「逐像素一致」断言天然容易写成恒真，
+      # 所以注入随机噪点 / 擦掉画面，确认它真的会红。
+      - name: 视觉回归自检（注入缺陷必须被抓到）
+        run: node scripts/audit/visual-self-test.mjs
 
       - name: 无障碍审计
         run: node --experimental-strip-types --no-warnings scripts/audit/a11y.ts

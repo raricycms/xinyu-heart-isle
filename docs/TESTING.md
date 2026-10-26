@@ -38,6 +38,7 @@ npx vitest run                    # 单元 + 性能
 npx tsc -b --noEmit               # 类型
 npx vite build                    # 构建 + 体积
 node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts
+node scripts/visual-regression.mjs                # 视觉回归（见 §4.8）
 node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
 ```
 
@@ -58,7 +59,7 @@ node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
 > 尤其是那种「不做会出隐蔽问题」的说法，它天然难以被证伪，
 > 容易一代代传下去。
 
-E2E、a11y、perf 依赖 `dist/`，必须先 `npx vite build`。三个脚本都会自己检查，
+E2E、视觉、a11y、perf 依赖 `dist/`，必须先 `npx vite build`。四个脚本都会自己检查，
 缺失时以退出码 2 明确报错，而不是静默跳过。
 
 ### 单个文件 / 单个用例
@@ -947,6 +948,97 @@ run 2: exit=2  端口 4174 已被占用  ← 看起来像环境问题
 
 ---
 
+### 4.8 加视觉回归：为什么不用基线图
+
+`docs/VISION.md` §7.4 的「视觉」一行要求「3 个场景 × 3 种摆法截图回归」。
+落地时**没有**做常规的「提交基线 PNG，每次比对」。
+
+#### 为什么放弃基线图
+
+| 问题 | 具体表现 |
+| --- | --- |
+| 环境噪声 | 反锯齿在不同 Chrome / 显卡 / DPI 下差几个像素是常态。基线图会把「换了一台机器」变成红灯，最后所有人都学会忽略这个门禁 |
+| 更新流程腐烂 | 基线必须人肉更新。一旦「红了就 `--update`」成为习惯，门禁等于不存在 |
+| diff 噪声 | 仓库已有 21 张 `scripts/dev/shots/` 的图，再堆一批二进制基线，code review 里全是无法阅读的像素 |
+
+#### 实际判据
+
+`scripts/visual-regression.mjs`（`npm run visual`，已进 `npm run check`）
+对 3 个场景各跑 **2 次**，逐像素比对：
+
+| 场景 | 考什么 |
+| --- | --- |
+| 平沙 · 单摆件 | 基线：沙面无扰动 |
+| 沙丘 · 埋沙摆件 | 山体遮挡、立面（`cell.wall`） |
+| 密集 · 多摆件重叠 | z-order 与阴影，4 个摆件前后重叠 |
+
+每个场景 5 条断言，加 1 条跨场景断言，共 **16 项**：
+
+1. `symbolId` 都真实存在（解析 `src/sandbox/symbols.ts` 得到 327 个合法 id）
+2. 两次渲染**逐像素一致**（容忍度 0）
+3. 画面非空白（非透明像素 ≥ 2%）
+4. 有明暗层次（亮度方差 ≥ 8）
+5. 结构指纹稳定（FNV-1a over RGBA）
+6. 三个场景画面**互不相同**
+
+#### 第 1 条和第 6 条是写这个门禁时才发现的必需品
+
+第一版种子写了 `tree / house / person / rock`。其中 `person`（真名 `man`）
+和 `rock`（真名 `stone`）**根本不存在**。页面不报错，只是把不认识的
+symbolId 渲染成灰色占位字形 —— 于是「密集」场景和「平沙」看起来差不多，
+而所有断言照样全绿。
+
+同一轮还犯了第二个错：会话种子字段名写成 `createdAt` / `cursor`，
+事件时间写成 `at` / `seq`。而 `coerceSession`（`src/format/migrate.ts`）
+认的是 `at` 与 `t`，校验不过就返回 `null`，被 `listSessions` 过滤掉，
+页面拿到的是**空白沙盘**。三个场景渲染出**完全相同的画面**，
+而「逐像素一致」「非空白」「有层次」全部通过。
+
+这两次都是同一个病灶：**断言只验一致性，不验「我测的还是我以为的那个东西」**。
+所以第 1 条（引用完整性）和第 6 条（场景间差异性）不是锦上添花，
+是这两类幽灵的专用捕手。
+
+#### 变异证据
+
+`scripts/audit/visual-self-test.mjs`（`npm run visual:self-test`，CI 跑）：
+
+| 变异 | 应命中的断言 | 结果 |
+| --- | --- | --- |
+| V1 每 100ms 往 canvas 撒 400 个红点 | 两次渲染逐像素一致 | ✓ exit 1 |
+| V2 每 60ms 用底色覆盖整块 canvas | 三个场景画面互不相同 | ✓ exit 1 |
+
+#### 顺带修掉的真实缺陷：`launchPreview` 静默忽略 `distDir`
+
+写变异测试时发现它**抓不到任何问题**。根因不在被测代码，在工具本身：
+
+```js
+// scripts/dev/_shared/preview.mjs（修复前）
+export async function launchPreview({ port, distDir = 'dist', cwd } = {}) {
+  if (!existsSync(resolve(cwd, distDir))) throw ...;   // ← distDir 只用在这里
+  const child = startPreview({ port, cwd });           // ← 没传下去！
+```
+
+`distDir` 只被存在性检查用了一次，**从未传给 vite**。于是变异测试传
+`tmp/mut-dist-xxx`，检查通过了，实际服务的还是默认 `dist/` ——
+注入的缺陷从没被加载，变异测试稳定地「抓不到问题」，而报错会显示成
+「断言没命中」，看起来像被测代码的毛病。
+
+修复是加 `extraArgs: ['--outDir', resolvedDist]`。这个坑的教训不是
+「记得传参数」，而是：**一个静默忽略的参数比没有这个参数更危险**，
+因为调用方以为自己控制住了。
+
+> 还有一处连带修复：`existsSync(join(cwd, distDir))` 对绝对路径会拼出
+> `C:\...\zhh\C:\...\zhh\dist`。改成 `resolve`，两种形式都对。
+
+#### 这个门禁的边界
+
+它**不是**像素基线回归。抓不到「重构后画面整体偏了 2px」「配色微调了
+一个色号」这类纯视觉漂移 —— 那需要基线图 + 人眼，本项目没做。
+它能抓的是非确定性渲染（随机数、未初始化缓冲、竞态、记忆化失效）
+和「画面结构变了」（场景互不相同、指纹变化）。
+
+---
+
 ## 5. 棘轮基线（a11y）
 
 > **现状（v2.0）**：基线已收窄到 **`entries: []`**，当前审计 **critical 0 / warning 0**。
@@ -1011,11 +1103,14 @@ run 2: exit=2  端口 4174 已被占用  ← 看起来像环境问题
 - **React hook 行为**：`environment: 'node'`，没有 jsdom。`useSyncExternalStore`
   的引用稳定性靠 `getPreferences()` 的 `toBe` + `getItemCalls` 缓存命中数间接验证，
   **不是**真实组件挂载。真正的白屏回归由 E2E 兜住。
-- **样式与视觉**：无视觉回归测试。CSS 改动只能靠人看。
+- **样式与视觉**：有视觉回归门禁（`scripts/visual-regression.mjs`，见 §4.8），
+  但它判的是**确定性**而不是「和基线图比」，所以**抓不到纯视觉漂移**
+  （比如重构后整体偏移 2px、配色微调）。这类改动仍然只能靠人看。
 - **跨浏览器**：只在 Chrome 跑过。Safari / Firefox 未验证。
 - **读屏实际体验**：a11y 审计是静态规则检查，不等于 NVDA / VoiceOver 实测。
-- **键盘全流程**：仅验证了量表作答的 1–4 快捷键；沙盘全键盘操作是 CONTRACT §7
-  的要求，目前只靠手工。
+- **键盘全流程**：量表作答的 1–4 快捷键有单测；沙盘全键盘操作已进 E2E
+  （`keyboard-flow` 场景，12 断言），但**只在 `dom2d` 渲染器下成立** ——
+  默认的 `iso2d` 没有摆件的键盘操作入口。
 - **IndexedDB 路径**：`src/lib/idb.ts` 的降级逻辑未单测（需要真实 IDB）。
 - **Stress / 长会话**：MAX_EVENTS = 4000 的边界有测，但「连续使用 30 天、
   记录数上千」这类累积场景没有。
@@ -1088,7 +1183,12 @@ jobs:
 
       # ---- 真浏览器门禁 ----
       - run: node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts
+      - run: node scripts/audit/e2e-self-test.mjs          # 移动端断言有效
+      - run: node scripts/audit/keyboard-self-test.mjs     # 键盘断言有效
+      - run: node scripts/visual-regression.mjs            # 视觉回归（§4.8）
+      - run: node scripts/audit/visual-self-test.mjs       # 视觉断言有效
       - run: node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
+      - run: node scripts/audit/meta-self-test.mjs         # a11y 规则有效
       - run: node --experimental-strip-types --no-warnings scripts/audit/perf.ts
 
       - uses: actions/upload-artifact@v4
@@ -1107,7 +1207,7 @@ jobs:
 
 注意事项：
 
-- **先 build 再跑 E2E / a11y**，顺序不能反。
+- **先 build 再跑 E2E / 视觉 / a11y**，顺序不能反。
 - E2E 失败时**必须上传截图**，否则无从判断是白屏还是断言写错。
 - `--strict` 现在**可以**加进 CI：基线已收窄到 0 条（`entries: []`），
   `--strict` 与默认模式当前等价，正是切到零容忍的时机。
