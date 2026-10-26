@@ -80,6 +80,10 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* 44px：CONTRACT §7 触摸目标。原 padding 10px 4px 8px + 22px 字形 ≈ 27.6px 高。
+     抬 min-height 并把内容垂直居中，横向 padding 不动（5 列网格要留着不换行）。 */
+  justify-content: center;
+  min-height: 44px;
   gap: 4px;
   min-width: 0;
   padding: 10px 4px 8px;
@@ -343,6 +347,13 @@
 
 .tabs__item {
   flex: none;
+  /* 44px：CONTRACT §7 触摸目标。原 padding 6px 15px ≈ 33.4px 高。
+     .tabs 自身是 overflow-x:auto 的横条，抬 min-height 只会让指示条高一点点，
+     不会撑破布局（它本来就不换行）。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
   padding: 6px 15px;
   border: 0;
   border-radius: var(--r-full);
@@ -565,6 +576,15 @@
   .record-row__time {
     width: 72px;
   }
+}
+
+/* 光晕的隐藏断点必须独立于上面的 760px 布局断点。
+   原因：.hero 的 max-width 是 760px，容器 padding 24px，
+   所以 .hero 右边缘固定在 24+760=784px；.hero__glow 是 right:-160px 的绝对定位，
+   右边缘恒为 944px。凡是视口 < 944px 且光晕仍在显示，就会横向溢出
+   （实测 768~943px 区间溢出 44~136px，iPad 竖屏 768 正好落在里面）。
+   所以这里单独提到 944px，与布局断点解耦。 */
+@media (max-width: 944px) {
   .hero__glow {
     display: none;
   }

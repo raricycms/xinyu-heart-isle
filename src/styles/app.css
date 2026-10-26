@@ -28,6 +28,9 @@
   gap: 10px;
   color: var(--teal-600);
   flex: none;
+  /* 44px：CONTRACT §7 触摸目标。品牌位原本 34px（由 .brand__mark 撑起），
+     页头高 64px，抬到 44px 不改变任何版式，只是把命中区补足。 */
+  min-height: 44px;
 }
 
 .brand:hover {
@@ -74,6 +77,12 @@
 
 .site-nav__link {
   position: relative;
+  /* 44px：CONTRACT §7 触摸目标。原来是 padding 7px 12px 撑出的 37.8px 高，
+     改成 min-height + 垂直居中后盒子自己就是 44px（伪元素溢出不算命中区，
+     审计量的是元素自身 box），横向 padding 保持 12px 不变以免导航变宽溢出。 */
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   padding: 7px 12px;
   border-radius: var(--r-full);
   color: var(--ink-500);
@@ -105,6 +114,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* 44px：CONTRACT §7 触摸目标。原 padding 6px 13px 只有 36.1px 高，
+     抬 min-height 不动横向宽度（页头右侧余量紧，不能让它变宽）。 */
+  min-height: 44px;
   padding: 6px 13px;
   border-radius: var(--r-full);
   border: 1px solid rgba(191, 106, 92, 0.3);
@@ -123,8 +135,10 @@
 
 .menu-toggle {
   display: none;
-  width: 36px;
-  height: 36px;
+  /* 44px：CONTRACT §7 触摸目标（原 36×36）。只在 <900px 出现，
+     页头高 64px，44px 仍能完整放下。 */
+  width: 44px;
+  height: 44px;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface);
@@ -163,6 +177,12 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  /* 防御性横向裁剪：装饰层（如 .hero__glow 的 right:-160px）一旦在某个断点漏出，
+     会在 768~943px 这类窄桌面/平板宽度造成整页横向滚动。
+     用 clip 而不是 hidden：clip 不创建滚动容器，不会让 .site-header 的
+     position: sticky 失效（hidden 会，那是这个项目踩过的坑）。
+     .site-header 是 .app-main 的兄弟节点，所以头部的 sticky 不受这里影响。 */
+  overflow-x: clip;
 }
 
 .site-footer {
@@ -202,9 +222,19 @@
 
 .site-footer__links {
   display: flex;
+  /* 44px：CONTRACT §7 触摸目标。相邻链接靠 gap:--sp-4(16px) 分开，
+     满足「相邻目标间隔 ≥8px」，所以直接抬链接自身盒子即可，不必用伪元素。 */
+  align-items: center;
   gap: var(--sp-4);
   flex-wrap: wrap;
   font-size: 13.5px;
+}
+
+.site-footer__links a {
+  /* 44px：CONTRACT §7 触摸目标（原 22.9px 行高盒） */
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
 }
 
 .site-footer__note {

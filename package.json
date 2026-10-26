@@ -1,27 +1,38 @@
 {
   "name": "xinyu-heart-isle",
   "private": true,
-  "version": "0.1.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "心屿 — 一个温和的心理自助工具站（量表 / 赛博沙盘 / 情绪工具箱 / 心理资源）",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit",
-    "lint": "tsc -b --noEmit"
+    "typecheck:all": "tsc -b --noEmit && tsc -p tsconfig.scripts.json --noEmit",
+    "e2e": "node --experimental-strip-types scripts/e2e/smoke.ts",
+    "a11y": "node --experimental-strip-types scripts/audit/a11y.ts",
+    "perf": "node --experimental-strip-types scripts/audit/perf.ts",
+    "validate": "node --experimental-strip-types scripts/validate-session.ts",
+    "check": "npm run typecheck:all && npm run build && npm run test && npm run validate -- samples/example.sandplay.json && npm run e2e && npm run a11y && npm run perf"
   },
   "dependencies": {
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-router-dom": "^7.18.4"
+    "react-router-dom": "^7.18.4",
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "puppeteer-core": "^24.43.1",
     "typescript": "~5.9.3",
-    "vite": "^8.3.5"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   }
 }

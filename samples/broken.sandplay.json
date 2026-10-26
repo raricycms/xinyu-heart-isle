@@ -1,0 +1,66 @@
+{
+  "format": "sandplay-session/v1",
+  "version": 1,
+  "exportedAt": "2026-10-26T14:40:00.000Z",
+  "producer": {
+    "app": "外部工具示例",
+    "version": "0.1.0"
+  },
+  "session": {
+    "id": "session_broken_0002",
+    "createdAt": "2026-10-26T14:35:00.000Z",
+    "title": "示例沙盘 · 故意写坏的文件",
+    "mode": "self",
+    "sceneId": "meadow",
+    "locked": false,
+    "items": [
+      {
+        "id": "item_0001",
+        "symbolId": "tree",
+        "x": 1.42,
+        "y": 0.58,
+        "scale": 1,
+        "rotation": 0,
+        "z": 1
+      },
+      {
+        "id": "item_0001",
+        "symbolId": "rock",
+        "x": 0.3,
+        "y": 0.7,
+        "scale": 1,
+        "rotation": 0,
+        "z": 2
+      }
+    ],
+    "events": [
+      {
+        "t": 0,
+        "type": "session.start",
+        "payload": {
+          "sceneId": "meadow",
+          "mode": "self"
+        }
+      },
+      {
+        "t": 3000,
+        "type": "item.fly",
+        "itemId": "item_0001",
+        "payload": {}
+      },
+      {
+        "t": 1500,
+        "type": "item.move",
+        "itemId": "item_0001",
+        "payload": {
+          "x": 0.5,
+          "y": 0.5
+        }
+      }
+    ],
+    "meta": {
+      "realName": "张三",
+      "phone": "13800000000"
+    }
+  }
+}

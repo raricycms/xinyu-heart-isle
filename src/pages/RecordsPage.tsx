@@ -9,7 +9,6 @@ import {
   importAll,
   journalStore,
   moodStore,
-  sandboxStore,
   scaleResultStore,
   STORAGE_KEYS,
   toolSessionStore,
@@ -20,7 +19,8 @@ import { useToast } from '@/lib/toast';
 import { cx } from '@/lib/utils';
 import { getScaleById } from '@/scales/data';
 import { getToolById } from '@/toolbox/tools';
-import type { JournalEntry, MoodEntry, SandboxSnapshot, ScaleResult, ToolSession } from '@/lib/types';
+import type { JournalEntry, MoodEntry, ScaleResult, ToolSession } from '@/lib/types';
+import { removeSession, isArchived, useSessions } from '@/lib/sessionStore';
 import '@/styles/home.css';
 
 type TabId = 'all' | 'mood' | 'scale' | 'tool' | 'sandbox' | 'journal';
@@ -71,7 +71,7 @@ export default function RecordsPage() {
   const moods = useCollection<MoodEntry>(STORAGE_KEYS.moods);
   const scaleResults = useCollection<ScaleResult>(STORAGE_KEYS.scaleResults);
   const toolSessions = useCollection<ToolSession>(STORAGE_KEYS.toolSessions);
-  const sandboxes = useCollection<SandboxSnapshot>(STORAGE_KEYS.sandbox);
+  const sandboxes = useSessions();
   const journals = useCollection<JournalEntry>(STORAGE_KEYS.journal);
   const { show } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -152,19 +152,23 @@ export default function RecordsPage() {
         key: `sandbox-${s.id}`,
         group: 'sandbox',
         at: s.at,
-        title: `沙盘 · ${s.title}`,
+        title: `沙盘 · ${s.title || '未命名'}`,
         desc: [
           `${s.items.length} 个摆件`,
-          s.reflection ? `自我解读：${s.reflection.slice(0, 60)}` : '',
+          `${s.events.length} 次操作`,
+          s.locked ? '已封盘' : '可继续',
+          isArchived(s) ? '已归档' : '',
+          s.reflection ? `写下的：${s.reflection.slice(0, 40)}` : '',
         ]
           .filter(Boolean)
           .join('　'),
         badge: '沙盘',
         tone: 'teal',
-        link: '/sandbox',
+        // 直达回放页：过程本身就是内容（VISION.md 维度三）
+        link: `/sandbox/session/${s.id}`,
         onDelete: () => {
-          sandboxStore.remove(s.id);
-          show('已删除这个沙盘快照。');
+          void removeSession(s.id);
+          show('已删除这次沙盘。');
         },
       });
     });
@@ -288,6 +292,7 @@ export default function RecordsPage() {
               type="file"
               accept="application/json,.json"
               className="sr-only"
+              aria-label="选择要导入的备份文件"
               onChange={handleImportFile}
             />
             <Button variant="danger" size="sm" onClick={handleClear}>

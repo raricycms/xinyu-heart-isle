@@ -1,0 +1,83 @@
+{
+  "format": "sandbox-symbol-pack/v1",
+  "id": "example-daily",
+  "name": "示例 · 日常小物",
+  "version": "1.0.0",
+  "author": "心屿示例",
+  "license": "CC0-1.0",
+  "description": "一个 8 条的示例沙具包，演示 sandbox-symbol-pack/v1 的最小可用结构。所有条目均为 Unicode 字符，可自由修改与再分发。",
+  "symbols": [
+    {
+      "id": "example-daily.rain-boot",
+      "label": "雨靴",
+      "labelEn": "Rain boots",
+      "category": "object",
+      "subcategory": "object-daily",
+      "glyph": "👢",
+      "tags": ["boots", "雨靴", "走路", "湿"]
+    },
+    {
+      "id": "example-daily.thermos",
+      "label": "保温杯",
+      "labelEn": "Thermos",
+      "category": "object",
+      "subcategory": "object-daily",
+      "glyph": "🫖",
+      "tags": ["thermos", "保温杯", "热水", "暖"]
+    },
+    {
+      "id": "example-daily.toothbrush",
+      "label": "牙刷",
+      "labelEn": "Toothbrush",
+      "category": "object",
+      "subcategory": "object-daily",
+      "glyph": "🪥",
+      "tags": ["toothbrush", "牙刷", "早上", "日常"]
+    },
+    {
+      "id": "example-daily.slippers",
+      "label": "拖鞋",
+      "labelEn": "Slippers",
+      "category": "object",
+      "subcategory": "object-daily",
+      "glyph": "🩴",
+      "tags": ["slippers", "拖鞋", "屋里", "松"]
+    },
+    {
+      "id": "example-daily.laundry",
+      "label": "晾衣架",
+      "labelEn": "Laundry rack",
+      "category": "object",
+      "subcategory": "object-tool",
+      "glyph": "🧺",
+      "tags": ["laundry", "晾衣", "家务", "晴"]
+    },
+    {
+      "id": "example-daily.vitamins",
+      "label": "药盒",
+      "labelEn": "Pill box",
+      "category": "object",
+      "subcategory": "object-tool",
+      "glyph": "🧴",
+      "tags": ["pill box", "药盒", "每天", "照顾"]
+    },
+    {
+      "id": "example-daily.bus-stop",
+      "label": "公交站牌",
+      "labelEn": "Bus stop sign",
+      "category": "building",
+      "subcategory": "building-public",
+      "glyph": "🚏",
+      "tags": ["bus stop", "站牌", "等", "通勤"]
+    },
+    {
+      "id": "example-daily.street-lamp",
+      "label": "路灯",
+      "labelEn": "Street lamp",
+      "category": "building",
+      "subcategory": "building-public",
+      "glyph": "🏮",
+      "tags": ["lamp", "路灯", "夜", "回家"]
+    }
+  ]
+}

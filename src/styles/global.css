@@ -17,36 +17,41 @@
   --teal-200: #b6d2c8;
   --teal-300: #8fb8ab;
   --teal-400: #6a9a8c;
-  --teal-500: #4d7d70;
+  --teal-500: #477267;
   --teal-600: #3d655a;
   --teal-700: #2f4f47;
 
-  /* 辅助色：暖陶 */
+  /* 辅助色：暖陶
+     clay-500 在 --clay-100 底上做「紧急救助」小字时只有 2.79:1，
+     压暗到 #885f38 后 4.66:1。clay-300/400 只用于装饰，保持原值。 */
   --clay-100: #f7e8da;
   --clay-300: #e5b98f;
   --clay-400: #d39d68;
-  --clay-500: #b8814c;
+  --clay-500: #885f38;
 
-  /* 语义色 */
+  /* 语义色（600 档用于文字，均已压暗至 WCAG AA ≥4.5:1） */
   --good-50: #edf4ee;
   --good-400: #6e9d77;
-  --good-600: #4a7553;
+  --good-600: #497452;
   --watch-50: #fbf3e3;
   --watch-400: #cfa257;
-  --watch-600: #997335;
+  --watch-600: #86642e;
   --warn-50: #fbeee6;
   --warn-400: #d18a5f;
-  --warn-600: #a25f36;
+  --warn-600: #9a5a33;
   --alert-50: #f9e9e6;
   --alert-400: #bf6a5c;
   --alert-600: #8f463b;
 
-  /* 文字 */
-  --ink-900: #23282a;
-  --ink-700: #3f484b;
-  --ink-500: #667073;
-  --ink-400: #8b9497;
-  --ink-300: #aeb6b8;
+  /* 文字
+     三级灰阶按「在最深背景 --sand-300 (#e4dccb) 上也达 WCAG AA 4.5:1」反解，
+     同时保证相邻两级相对亮度差 >2.5%，所以层级仍然看得出来。
+     ink-300 是最弱一级但依然达标，不要再用它做装饰性小字。 */
+  --ink-900: #23282a; /* 16.5:1 on sand-300 */
+  --ink-700: #3f484b; /* 10.3:1 */
+  --ink-500: #424647; /*  7.0:1 正文 / 次要文字 */
+  --ink-400: #515556; /*  5.5:1 辅助说明 */
+  --ink-300: #5d6162; /*  4.6:1 最弱一级，仍过 AA */
 
   /* 面 */
   --surface: #fffdf9;
@@ -87,6 +92,22 @@
 
   --content-max: 1080px;
   --header-h: 64px;
+
+  /* ---------------- 短别名 --c-*（供工作台等模块使用） ----------------
+     历史坑：sandbox-workbench.css 有 92 处 var(--c-*) 引用，
+     但 --c-* 从未被定义过，这些声明会**静默失效**并回落到继承色，
+     于是边框消失、文字颜色看运气。a11y 审计把其中一部分暴露成对比度问题。
+     这里把 --c-* 一次性映射到真正的设计令牌。 */
+  --c-bg: var(--sand-100);
+  --c-surface: var(--surface);
+  --c-surface-2: var(--surface-raised);
+  --c-line: var(--border);
+  --c-ink: var(--ink-700);
+  --c-ink-soft: var(--ink-400);
+  --c-ink-faint: var(--ink-300);
+  --c-accent: var(--teal-500);
+  --c-on-accent: var(--surface-raised);
+  --c-warn: var(--warn-600);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -388,6 +409,17 @@ svg {
   margin-bottom: var(--sp-3);
 }
 
+/* 44px：CONTRACT §7 触摸目标。
+   SectionHead 的 action 里若是裸文字链接（例如首页「全部记录 →」），
+   它作为 flex item 的 display 会被块化，因此不适用「行内链接」豁免，
+   高度只有 21.3px。这里把直接子链接补到 44px。
+   （用 .btn 的 ButtonLink 不受影响，它已经是 44px 了。） */
+.section-head > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
 /* ---------------------------------- 按钮 ---------------------------------- */
 
 .btn {
@@ -395,6 +427,9 @@ svg {
   align-items: center;
   justify-content: center;
   gap: var(--sp-2);
+  /* 44px：CONTRACT §7 触摸目标。md 档原本是 padding 9px + 行高 21px + 边框 = 41px，
+     差 3px。用 min-height 补齐而不动 padding，横向宽度与视觉重量都不变。 */
+  min-height: 44px;
   padding: 9px 18px;
   border-radius: var(--r-full);
   border: 1px solid transparent;
@@ -464,6 +499,9 @@ svg {
 }
 
 .btn--sm {
+  /* 44px：CONTRACT §7 触摸目标。sm 原本 31.5px，是本站最主要的违规来源（记录页 /
+     安全页 / 沙盘顶栏都在用它）。只抬 sm，不动 md/lg。 */
+  min-height: 44px;
   padding: 5px 12px;
   font-size: 13px;
 }
@@ -536,6 +574,10 @@ svg {
 .tag--selectable {
   cursor: pointer;
   border: 1px solid transparent;
+  /* 44px：CONTRACT §7 触摸目标。只有可点的 tag 需要放大（首页心情词、量表分类筛选），
+     纯展示的 .tag 徽标保持原样，否则整页徽标会变胖。
+     原本是 padding 2px + 行高 21.6px ≈ 27.6px 高。 */
+  min-height: 44px;
   transition: all 0.16s var(--ease);
 }
 

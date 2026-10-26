@@ -102,7 +102,15 @@
 .helpline__number {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  /* 44px：CONTRACT §7 触摸目标（原 34.6px 高 = 22px 字号 × 1.3 行高 + 上下 2px）。
+     号码是危机场景下最该点中的东西，抬 min-height 比加 padding 安全：
+     不会让号码行变宽，也不会把 .helpline__number-row 挤到换行。
+     min-width 也必须是 44：120 / 110 / 119 这类三位短号加上
+     letter-spacing 后只有 42px 宽。 */
+  min-height: 44px;
+  min-width: 44px;
   font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
   font-size: 22px;
@@ -200,7 +208,12 @@
 .safety-quickdial {
   display: grid;
   gap: var(--sp-2);
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  /* auto-fit 的 minmax 下限从 150px 提到 180px：
+     180px 是「20px 字号下最长号码 400-161-9995（约 141px）+ 左右 padding 24px」
+     的最小安全宽度。低于这个值号码就会被挤成两行。
+     提下限后，390 / 414 这类「两列只剩 158~170px」的尴尬宽度会自动退化成单列，
+     而不是把号码折断。 */
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   margin-top: var(--sp-4);
 }
 
@@ -232,7 +245,12 @@
 }
 
 .quickdial__number {
+  /* 号码必须完整可见：危机场景下用户是照着屏幕拨号的，折行会导致拨错。
+     nowrap 保证任何情况下都不断开；配合 .safety-quickdial 的 minmax(180px)
+     自适应列宽，窄屏会先退化成单列而不是把号码挤折。
+     字号维持 20px 不缩小 —— 这是全页最该一眼看清的数字。 */
   font-size: 20px;
+  white-space: nowrap;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--alert-600);
@@ -432,8 +450,17 @@
 .safety-index {
   display: flex;
   flex-wrap: wrap;
+  /* 44px：CONTRACT §7 触摸目标。这些锚点是 .tag--outline（展示型 tag，
+     不吃 .tag--selectable 的 44px），高只有 27.6px，所以在这里单独补。
+     相邻间隔 --sp-2(8px) 满足「≥8px」的间距要求。 */
+  align-items: center;
   gap: var(--sp-2);
   margin-top: var(--sp-4);
+}
+
+.safety-index .tag {
+  /* 44px：CONTRACT §7 触摸目标（原 27.6px 高） */
+  min-height: 44px;
 }
 
 /* ============================== 三、资源页 /resources ============================== */
@@ -669,8 +696,11 @@
     font-size: 14px;
   }
 
+  /* 原先这里硬写成 1fr 1fr（两列），是 390 / 414 号码折行的直接原因：
+     两列时卡片只剩 158~170px，扣掉 padding 后放不下 141px 的号码。
+     改成 auto-fit + 180px 下限后，放得下时仍然两列，放不下自动单列。 */
   .safety-quickdial {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
 
   .quickdial {

@@ -1,0 +1,1313 @@
+/* ==========================================================================
+   工作台（Workbench）
+   --------------------------------------------------------------------------
+   布局：网格 = 顶栏 / [左栏 | 舞台 | 右栏] / 底部抽屉
+   断点：>= 1200px 三栏；768-1199px 两栏（右栏折叠为抽屉）；< 768px 单栏
+   所有尺寸走 global.css 的设计令牌，禁止硬编码色值
+   ========================================================================== */
+
+.wb {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--c-bg);
+}
+
+.wb--focus {
+  /* 专注模式：除了舞台，全部淡出 */
+  cursor: default;
+}
+
+/* --------------------------------- 顶栏 ---------------------------------- */
+
+.wb-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--c-line);
+  background: color-mix(in srgb, var(--c-surface) 92%, transparent);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  flex-wrap: wrap;
+}
+
+.wb-bar__left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex: 1 1 200px;
+}
+
+.wb-bar__center {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.wb-bar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wb-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--c-ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: var(--sp-1) var(--sp-2);
+  min-width: 0;
+  flex: 1 1 120px;
+  max-width: 320px;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.wb-title:hover {
+  border-color: var(--c-line);
+}
+
+.wb-title:focus {
+  outline: none;
+  border-color: var(--c-accent);
+  background: var(--c-surface);
+}
+
+.wb-dirty {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-faint);
+  white-space: nowrap;
+}
+
+.wb-dirty--on {
+  color: var(--c-warn);
+}
+
+.wb-count {
+  white-space: nowrap;
+}
+
+/* 分段按钮 */
+
+.wb-seg {
+  display: inline-flex;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  background: var(--c-surface);
+  padding: 2px;
+  gap: 2px;
+}
+
+.wb-seg__btn {
+  border: none;
+  background: transparent;
+  border-radius: var(--r-pill);
+  /* 44px：CONTRACT §7 触摸目标（原 min-height 32px）。
+     模式切换只有 2 个按钮，「自我 / 咨询」是顶栏最重要的决定，值得占满 44px。 */
+  min-height: 44px;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-soft);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  white-space: nowrap;
+}
+
+.wb-seg__btn:hover {
+  color: var(--c-ink);
+}
+
+.wb-seg__btn.is-active {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+}
+
+.wb-seg__btn:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+/* 下拉 */
+
+.wb-select {
+  display: inline-flex;
+}
+
+.wb-select__input {
+  /* 44px：CONTRACT §7 触摸目标（原 36px）。场景 / 渲染器两个下拉都是 select 元素，
+     审计同样按 44px 卡。顶栏是 flex-wrap，抬高不会溢出。 */
+  min-height: 44px;
+  font-size: var(--fs-sm);
+  padding: var(--sp-1) var(--sp-2);
+  max-width: 150px;
+}
+
+/* 图标按钮 */
+
+.wb-iconbtn-group {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.wb-iconbtn {
+  border: none;
+  background: var(--c-surface);
+  color: var(--c-ink-soft);
+  /* 44px：CONTRACT §7 触摸目标（原 40×40）。撤销/重做是图标按钮，
+     没有文字可读，命中区不足时最容易误触，正好补到 44。 */
+  width: 44px;
+  height: 44px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.wb-iconbtn:hover:not(:disabled) {
+  background: var(--c-surface-2);
+  color: var(--c-ink);
+}
+
+.wb-iconbtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.wb-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* --------------------------------- 主区 ---------------------------------- */
+
+.wb-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 300px;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  align-items: start;
+  min-height: 0;
+}
+
+.wb-main--two {
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.wb-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.wb-col--stage {
+  min-height: 0;
+}
+
+/* --------------------------------- 舞台 ---------------------------------- */
+
+.wb-stage {
+  position: relative;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  border: 1px solid var(--c-line);
+  box-shadow: var(--shadow-1);
+  background: var(--c-sand, #e8dcc8);
+  aspect-ratio: 4 / 3;
+  min-height: 320px;
+  max-height: calc(100vh - 220px);
+  touch-action: none;
+}
+
+.wb-stage > * {
+  width: 100%;
+  height: 100%;
+}
+
+/* 两个 canvas（底图 + 笔刷浮层）必须绝对定位叠放，
+   否则它们会各占 100% 高度垂直堆叠，第二个被 overflow 裁掉 */
+.wb-stage > canvas,
+.wb-stage > .iso2d,
+.wb-stage > .dom2d,
+.wb-stage > [class$='renderer'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * `.wb-stage > *` 的 100%×100% 是给「铺满舞台」的元素用的（三个渲染器、空态）。
+ * 浮动面板需要把尺寸放开，否则会被撑满整个舞台 ——
+ * 表现是**画布点不动**：面板盖在托盘上，沙面笔画再也落不下去，
+ * 而且因为面板本身是半透明卡片，视觉上「看起来还好」，只有去拖画布才发现。
+ *
+ * 注意这里**只放开 height，不碰 width**：
+ * 选择器 `.wb-stage > .wb-inspector` 的优先级（0,2,0）高于 `.wb-inspector`
+ * （0,1,0），一旦在这里写 `width: auto`，就会盖掉检查器自己的 `width: 260px`，
+ * 让它变成 shrink-to-fit 的 727px 宽 —— 反而更糟（这个坑我当场踩了一次）。
+ * 检查器、工具条、徽标各自都有 width 规则，让它们自己说了算。
+ */
+.wb-stage > .wb-surfacebar,
+.wb-stage > .wb-inspector,
+.wb-stage > .wb-stage__badge,
+.wb-stage > .wb-stage__empty,
+.wb-stage > .ss-toolbar,
+.wb-stage > .wb-silence,
+.wb-stage > .wb-silence--floating {
+  height: auto;
+}
+
+.wb-stage__badge {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 3px var(--sp-2);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--c-surface) 82%, transparent);
+  backdrop-filter: blur(6px);
+  font-size: var(--fs-xs);
+  color: var(--c-ink-soft);
+  pointer-events: none;
+}
+
+.wb-stage__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  text-align: center;
+  padding: var(--sp-6);
+  pointer-events: none;
+  color: var(--c-ink-faint);
+}
+
+.wb-stage__empty-glyph {
+  font-size: 2.4rem;
+  opacity: 0.5;
+}
+
+/* 沙面工具条（覆盖在舞台底部） */
+
+/*
+ * `SurfaceToolbar` 组件的 `.ss-toolbar` 是**流式**布局（它在设计上要能被任意
+ * 容器使用，所以自己不写 `position`）。放进 `.wb-stage` 这种
+ * `position: relative` 的舞台里时，必须由这里把它钉到底部悬浮 ——
+ * 否则它会撑满整个舞台并盖住画布，**所有 pointerdown 都被工具条吃掉**，
+ * 沙面笔画一笔都画不出来。
+ *
+ * 定位用 `left + right` 而不是老代码的 `left: 50% + translateX(-50%)`：
+ * 绝对定位元素的 shrink-to-fit 可用宽度 = 包含块宽度 - left 偏移，
+ * 用 `left: 50%` 时可用宽度只剩一半（804px 的舞台只给 402px），
+ * 于是 `flex-wrap: wrap` 把工具条折成一个 401×231 的大方块糊在托盘中央。
+ * 改成左右都贴边后可用宽度是全宽，再用 `margin-inline: auto` 居中
+ * （absolutely positioned 元素的 `margin: auto` 会在 over-constrained
+ * 情况下自动吸收剩余空间，效果与 translateX 居中一致但不受宽度限制）。
+ */
+.wb-stage > .ss-toolbar {
+  position: absolute;
+  left: var(--sp-3);
+  right: var(--sp-3);
+  bottom: var(--sp-3);
+  /*
+   * z-index 必须**高于检查器**（`.wb-inspector` 是 15）。
+   *
+   * 两个都是 `.wb-stage` 的绝对定位子元素，检查器固定在右上、工具条固定在底部，
+   * 高度够的时候不该重叠 —— 但舞台只有 ~600px 高，
+   * 选中一个大摆件时检查器往下延伸，正好压住工具条右边的半径/力度滑块。
+   * 截图里看得很清楚：检查器盖住了「笔刷大小」滑杆的右半截，拖不到头。
+   *
+   * 判断依据是**哪个更不可替代**：检查器关掉还能再点开（点画布取消选中即可），
+   * 工具条是持续操作的入口，被压住就直接干不了活。
+   * 所以工具条压在上层。
+   */
+  z-index: 20;
+  width: fit-content;
+  max-width: calc(100% - var(--sp-6));
+  margin-inline: auto;
+  /* 一行放下：折行会让悬浮条变成大色块挡住托盘 */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.wb-stage > .ss-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * 悬浮条内的滑杆。
+ *
+ * 宽度是**被两头夹住**的：
+ *   - 下界：`check-surface-a11y.mjs` 要求 ≥100px（拖拽精度，太窄则手腕抖动放大成大跳档）；
+ *   - 上界：整个工具条要塞进 ~770px 的舞台宽度，否则「重铺整盘沙」按钮会被裁掉。
+ * 100px 是唯一能同时满足两边的值，所以这里写死 100，不写 min-width 让它自由伸缩。
+ */
+.wb-stage > .ss-toolbar .ss-range {
+  flex: 0 0 auto;
+  width: 100px;
+  min-width: 100px;
+}
+
+/*
+ * 悬浮条里**所有分组都不许折行**。
+ * 组件默认 `flex-wrap: wrap`（它要能塞进窄侧栏，那时折行是对的），
+ * 但作为舞台底部的悬浮条，一旦折行就从「一条工具带」变成
+ * 「一块 401×231 的色块糊在托盘中间」，把画布挡掉一大半。
+ * 宽度不够时靠 `overflow-x: auto` 横向滚动，不靠折行。
+ */
+.wb-stage > .ss-toolbar .ss-toolbar__group,
+.wb-stage > .ss-toolbar .ss-toolbar__group--tools,
+.wb-stage > .ss-toolbar .ss-toolbar__group--ranges,
+.wb-stage > .ss-toolbar .ss-toolbar__group--reset {
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+}
+
+/*
+ * 收紧横向留白，把 770px 的可用宽度挤出来。
+ *
+ * 实测：滑杆从 116 收到 100 只省了 32px，scrollWidth 仍是 806，
+ * 而可用 clientWidth 只有 768 —— 「重铺整盘沙」被右边切掉一角。
+ * 差 38px，纯靠缩滑杆已经没空间了（a11y 底线 100）。
+ *
+ * 于是从三处纯装饰性的留白里挤：
+ *   - 工具条自身 padding 12 → 8（左右各省 4）
+ *   - 每个笔刷按钮 padding var(--sp-2) → 6px（8 个按钮，左右各省 2×8×2）
+ *   - 分组间距压缩
+ * 这些都不影响触摸目标 ÷48×48 的最小尺寸（高度不变、宽度仍 ≥44），
+ * 只是让按钮之间的空隙小一点，视觉上反而更像「一条工具带」。
+ */
+.wb-stage > .ss-toolbar {
+  padding: 7px 6px;
+  gap: 5px;
+}
+
+/* 舞台内的工具条比独立使用时更紧凑 */
+.wb-stage > .ss-toolbar .ss-tool {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  gap: 2px;
+}
+
+.wb-stage > .ss-toolbar .ss-toolbar__group {
+  gap: 4px;
+}
+
+/*
+ * 专注模式入口。
+ *
+ * 它是 `.wb` 的直接子元素（不是 `.wb-stage` 的子元素），因为专注态下
+ * 舞台可能整个消失，出口不能跟着消失。所以用 `position: fixed` 钉在视口右下角，
+ * 而不是 `absolute` 相对某个容器 —— 后者会让它跟着页面滚动跑掉。
+ *
+ * 平时它就在工具条右侧（组件放在 `.wb-bar` 里），这里的 fixed 定位只在
+ * 专注态（`.wb-silence--floating`）生效。实测过的坑：不加 `position` 时
+ * 它会作为普通流元素排到页面最底部（y=1100，视口外），用户根本看不到，
+ * 也就无法退出专注模式 —— 一个「进去了出不来」的死路。
+ */
+.wb-silence {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.wb-silence--floating {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: 60;
+  /* 浮在托盘上时要有底色，否则压在沙面上看不清 */
+  padding: var(--sp-1);
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--c-surface) 92%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-2);
+  border: 1px solid var(--c-line);
+}
+
+.wb-surfacebar {
+  position: absolute;
+  left: 50%;
+  bottom: var(--sp-3);
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--c-surface) 90%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-2);
+  border: 1px solid var(--c-line);
+  max-width: calc(100% - var(--sp-6));
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.wb-surfacebar::-webkit-scrollbar {
+  display: none;
+}
+
+.wb-tool {
+  border: none;
+  background: transparent;
+  border-radius: var(--r-pill);
+  min-width: 44px;
+  min-height: 44px;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-soft);
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  flex-shrink: 0;
+}
+
+.wb-tool__glyph {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.wb-tool__label {
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.wb-tool:hover {
+  background: var(--c-surface-2);
+  color: var(--c-ink);
+}
+
+.wb-tool.is-active {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+}
+
+.wb-tool:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.wb-surfacebar__sep {
+  width: 1px;
+  height: 28px;
+  background: var(--c-line);
+  flex-shrink: 0;
+  margin-inline: var(--sp-1);
+}
+
+/* -------------------------------- 检查器 --------------------------------- */
+
+.wb-inspector {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  width: 260px;
+  max-height: calc(100% - var(--sp-4));
+  overflow-y: auto;
+  z-index: 15;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-inspector__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--c-line);
+}
+
+.wb-inspector__glyph {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.wb-inspector__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.wb-inspector__meta strong {
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-close {
+  border: none;
+  background: transparent;
+  color: var(--c-ink-faint);
+  cursor: pointer;
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: var(--r-sm);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.wb-close:hover {
+  background: var(--c-surface-2);
+  color: var(--c-ink);
+}
+
+.wb-inspector__body {
+  padding: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.wb-slider {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.wb-slider__label {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-xs);
+  color: var(--c-ink-soft);
+}
+
+.wb-inspector__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.wb-inspector__group-title {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--c-ink-soft);
+  letter-spacing: 0.02em;
+}
+
+.wb-inspector__hint {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.wb-inspector__note {
+  font-size: var(--fs-sm);
+  resize: vertical;
+  min-height: 52px;
+}
+
+.wb-inspector__foot {
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border-top: 1px solid var(--c-line);
+  justify-content: space-between;
+}
+
+/* 感受标签 */
+
+.wb-affects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.wb-affect {
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  color: var(--c-ink-soft);
+  border-radius: var(--r-pill);
+  /* 44px：CONTRACT §7 触摸目标（原 min-height 30px）。
+     感受标签是沙盘里点得最多的一类目标，13 个挤在 flex-wrap 容器里，
+     所以只抬高度、不改横向 padding，避免每行能放的标签数变少。
+     min-width 同样必须给：单字标签（「紧」「麻」）只有 33px 宽。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 4px var(--sp-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+
+.wb-affect:hover:not(:disabled) {
+  border-color: var(--c-accent);
+  color: var(--c-ink);
+}
+
+.wb-affect.is-active {
+  background: var(--c-accent-soft, #dcece9);
+  border-color: var(--c-accent);
+  color: var(--c-accent-ink, #24564f);
+  font-weight: 600;
+}
+
+.wb-affect:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* -------------------------------- 侧栏卡片 ------------------------------- */
+
+.wb-card {
+  padding: var(--sp-3);
+}
+
+.wb-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.wb-card__head strong {
+  font-size: var(--fs-sm);
+  color: var(--c-ink);
+}
+
+.wb-link {
+  border: none;
+  background: transparent;
+  color: var(--c-accent);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  /* 44px：CONTRACT §7 触摸目标（原 min-height 32px）。引导语卡片的「换一组」，
+     是这一栏唯一的文字按钮，抬到 44 也顺便让它看起来更像可点的。 */
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--sp-1);
+  border-radius: var(--r-sm);
+}
+
+.wb-link:hover {
+  text-decoration: underline;
+}
+
+/* 小号 tabs */
+
+.wb-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--c-line);
+  margin-bottom: var(--sp-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.wb-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.wb-tab {
+  border: none;
+  background: transparent;
+  /* 44px：CONTRACT §7 触摸目标（原 min-height 36px）。
+     .wb-tabs 是横向滚动的 tab 条，抬高度不会撑破布局。 */
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--c-ink-faint);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.wb-tab:hover {
+  color: var(--c-ink-soft);
+}
+
+.wb-tab.is-active {
+  color: var(--c-accent);
+  border-bottom-color: var(--c-accent);
+  font-weight: 600;
+}
+
+.wb-tab:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: -2px;
+}
+
+/* 引导语列表 */
+
+.wb-prompts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.wb-prompts__item {
+  position: relative;
+  padding-left: var(--sp-4);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--c-ink-soft);
+}
+
+.wb-prompts__item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.62em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  opacity: 0.5;
+}
+
+/* -------------------------------- 弹层 ---------------------------------- */
+
+.wb-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: color-mix(in srgb, #1a1712 45%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.wb-modal__panel {
+  background: var(--c-surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
+  padding: var(--sp-5);
+  width: min(440px, 100%);
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+/* 专注模式 */
+
+.wb--focus .wb-bar,
+.wb--focus .wb-col:not(.wb-col--stage),
+.wb--focus .wb-surfacebar {
+  display: none;
+}
+
+.wb--focus .wb-main {
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--sp-2);
+}
+
+.wb--focus .wb-stage {
+  max-height: calc(100vh - 40px);
+  aspect-ratio: auto;
+  height: calc(100vh - 40px);
+}
+
+.wb-focushint {
+  position: fixed;
+  bottom: var(--sp-3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--c-surface) 88%, transparent);
+  border: 1px solid var(--c-line);
+  font-size: var(--fs-xs);
+  color: var(--c-ink-faint);
+  pointer-events: none;
+}
+
+/* ------------------------------- 沙具库插槽 ------------------------------ */
+
+.wb-libsearch {
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-sm);
+  min-height: 40px;
+}
+
+.wb-libgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: var(--sp-1);
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.wb-libitem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 64px;
+  padding: var(--sp-1) 2px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+
+.wb-libitem:hover:not(:disabled) {
+  border-color: var(--c-accent);
+  transform: translateY(-1px);
+}
+
+.wb-libitem:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.wb-libitem:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.wb-libitem:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 1px;
+}
+
+.wb-libitem__glyph {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.wb-libitem__label {
+  font-size: 10px;
+  line-height: 1.15;
+  color: var(--c-ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* 2.5D 渲染器 */
+
+.iso2d {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+.iso2d--grab {
+  cursor: grab;
+}
+
+.iso2d--grab:active {
+  cursor: grabbing;
+}
+
+.iso2d--brush {
+  cursor: crosshair;
+}
+
+.iso2d__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.iso2d__canvas--overlay {
+  pointer-events: none;
+}
+
+/* 简洁平面渲染器 */
+
+.dom2d {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: var(--sp-2);
+}
+
+.dom2d__grid {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--r-md);
+  border: 1px dashed var(--c-line);
+}
+
+.dom2d__item {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--c-surface) 75%, transparent);
+  padding: 2px 4px;
+  cursor: grab;
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+}
+
+.dom2d__item:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.dom2d__item.is-selected {
+  border-color: var(--c-accent);
+  background: var(--c-accent-soft, #dcece9);
+}
+
+.dom2d__glyph {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+/* 沙具包里的图片型沙具（见 src/sandbox/render/symbolSource.ts） */
+.dom2d__img {
+  display: block;
+  width: 1.6em;
+  height: 1.6em;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.dom2d__label {
+  font-size: 9px;
+  color: var(--c-ink-soft);
+  white-space: nowrap;
+}
+
+/* 3D 渲染器 */
+
+.three-renderer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #f2efe8;
+}
+
+.three-renderer canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.three-renderer__hint {
+  position: absolute;
+  left: var(--sp-2);
+  bottom: var(--sp-2);
+  margin: 0;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--c-surface) 85%, transparent);
+  pointer-events: none;
+}
+
+/* 分类 tabs */
+
+.wb-libcats {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+
+.wb-libcat {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  border-radius: var(--r-pill);
+  padding: 3px var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--c-ink-soft);
+  cursor: pointer;
+  /* 44px：CONTRACT §7 触摸目标（原 min-height 30px）。沙具库分类筛选，
+     横向 padding 不动，wrap 容器里每行数量保持不变。 */
+  min-height: 44px;
+  transition: all var(--dur-fast) var(--ease);
+}
+
+.wb-libcat:hover {
+  border-color: var(--c-accent);
+  color: var(--c-ink);
+}
+
+.wb-libcat.is-active {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: var(--c-on-accent);
+}
+
+.wb-libcat__count {
+  font-size: 9px;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 子类分节 */
+
+.wb-libsubs {
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.wb-libsub {
+  margin-bottom: var(--sp-3);
+}
+
+.wb-libsub:last-child {
+  margin-bottom: 0;
+}
+
+.wb-libsub__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--c-ink-soft);
+  margin: 0 0 var(--sp-1);
+  padding-bottom: 3px;
+  border-bottom: 1px dashed var(--c-line);
+}
+
+.wb-libsub__count {
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--c-ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 笔刷参数条 */
+
+.wb-brushbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  flex-wrap: wrap;
+}
+
+.wb-brushbar .wb-slider {
+  flex: 0 1 180px;
+  min-width: 140px;
+}
+
+.wb-brushbar__hint {
+  flex: 1 1 200px;
+  margin: 0;
+}
+
+/* ------------------------------ 响应式 ---------------------------------- */
+
+
+@media (max-width: 1199px) {
+  .wb-main {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .wb-col--side {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .wb-col--side .wb-card {
+    flex: 1 1 280px;
+  }
+
+  .wb-inspector {
+    width: 220px;
+  }
+}
+
+@media (max-width: 767px) {
+  .wb-bar {
+    padding: var(--sp-2);
+    gap: var(--sp-2);
+  }
+
+  .wb-bar__left,
+  .wb-bar__center,
+  .wb-bar__right {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+
+  .wb-title {
+    font-size: var(--fs-base);
+    max-width: none;
+  }
+
+  .wb-select__input {
+    max-width: 120px;
+  }
+
+  .wb-main,
+  .wb-main--two {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--sp-2);
+    gap: var(--sp-2);
+  }
+
+  /*
+   * 单列时改成「舞台优先」的顺序。
+   *
+   * 桌面端三栏是「沙具库 | 舞台 | 右栏」，DOM 顺序即视觉顺序，没问题。
+   * 但单列后 DOM 顺序直接变成纵向堆叠顺序：用户要先滚过 24 个沙具的
+   * 列表（手机上约 1000px），才能看到沙盘本身 —— 而沙盘才是这一页的主体。
+   * 实测 `sandbox-stage` 的 y 坐标在 390×844 下是 1035，整个第一屏都看不到它。
+   *
+   * 用 `order` 把舞台提到最前，沙具库紧随其后（要挑东西就得能摸到），
+   * 右栏（情绪词 / 记录）放最后。DOM 顺序不动，所以 Tab 焦点顺序
+   * 仍然遵循源码顺序，改的只是视觉排列。
+   */
+  .wb-col--stage {
+    order: 1;
+  }
+
+  .wb-col--lib {
+    order: 2;
+  }
+
+  .wb-col--side {
+    order: 3;
+    flex-direction: column;
+  }
+
+  .wb-stage {
+    aspect-ratio: 1 / 1;
+    min-height: 280px;
+    max-height: none;
+  }
+
+  .wb-inspector {
+    position: fixed;
+    left: var(--sp-2);
+    right: var(--sp-2);
+    bottom: var(--sp-2);
+    top: auto;
+    width: auto;
+    max-height: 55vh;
+    z-index: 60;
+  }
+
+  .wb-surfacebar {
+    bottom: var(--sp-2);
+    left: var(--sp-2);
+    right: var(--sp-2);
+    transform: none;
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  .wb-tool {
+    min-width: 44px;
+  }
+
+  .wb-actions {
+    flex-wrap: wrap;
+  }
+
+  .wb-modal__panel {
+    padding: var(--sp-4);
+  }
+}
+
+@media (max-width: 380px) {
+  .wb-tool__label {
+    display: none;
+  }
+
+  .wb-tool {
+    min-width: 44px;
+    padding: var(--sp-1);
+  }
+}
+
+/* --------------------------- 减少动效偏好 ------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-seg__btn,
+  .wb-iconbtn,
+  .wb-tool,
+  .wb-affect,
+  .wb-tab {
+    transition: none;
+  }
+
+  .wb-bar {
+    backdrop-filter: none;
+  }
+}
+
+/* ----------------------------- 高对比度 --------------------------------- */
+
+@media (prefers-contrast: more) {
+  .wb-bar,
+  .wb-surfacebar,
+  .wb-inspector,
+  .wb-modal__panel {
+    border: 2px solid var(--c-ink);
+  }
+
+  .wb-tool__label {
+    font-weight: 600;
+  }
+}

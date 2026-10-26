@@ -7,18 +7,42 @@
 
 ## 一、当前状态
 
-| 项目 | 状态 | 说明 |
-| --- | --- | --- |
-| 类型检查 `npx tsc -b --noEmit` | ✅ 0 错误 | |
-| 生产构建 `npx vite build` | ✅ 通过 | 67 个模块 |
-| 10 个路由 | ✅ 全部可渲染 | 桌面 1440px + 移动 390px 双端验证 |
-| 浏览器控制台 | ✅ 0 错误 | 26 次页面渲染采集 |
-| 交互全流程 | ✅ 通过 | 见 PLAN.md 8.1 |
-| 计分引擎单元测试 | ❌ **未编写** | 最高优先级技术债 |
-| 量表内容专业审核 | ❌ **未进行** | 上线前阻断项 |
-| 热线号码拨打核验 | ❌ **未进行** | 上线前阻断项 |
+> 核对于 v2.0（2026-10）。每条都给了**可复现的验证命令**，不要相信数字，请自己跑。
 
-**一句话结论**：代码可以跑，产品可以演示，但**不能直接面向真实用户上线**——差的是内容审核和号码核验，不是功能。
+| 项目 | 状态 | 验证方式 |
+| --- | --- | --- |
+| 类型检查（应用） | ✅ 0 错误 | `npx tsc -b --noEmit` |
+| 类型检查（脚本） | ✅ 0 错误 | `npx tsc -p tsconfig.scripts.json --noEmit` |
+| 生产构建 | ✅ 通过 | `npx vite build` |
+| 主包体积 | ✅ gzip **140.7 kB**（预算 175 kB） | 看上一条输出的 `index-*.js` |
+| 单元测试 | ✅ 17 文件 / 546 用例全绿 | `npx vitest run` |
+| E2E 冒烟 | ✅ 10 场景 / 108 断言 | `node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts` |
+| 无障碍审计 | ✅ critical 0 / warning 0 / exit 0 | `npx vite build && node --experimental-strip-types --no-warnings scripts/audit/a11y.ts` |
+| 首屏可交互 | ✅ 常态 408–456ms（预算 1500ms，失败线 3000ms） | `npm run perf`（需先 `npm run build`） |
+| 格式校验器 | ✅ 通过 | `node --experimental-strip-types --no-warnings scripts/validate-session.ts samples/example.sandplay.json` |
+| 多路由 + 深链刷新 + 移动端 | ✅ 通过 | `node scripts/dev/check-routes.mjs` |
+| 计分引擎单元测试 | ✅ 65 条断言全绿 | `npx vitest run src/scales/scoring.test.ts` |
+| 量表内容专业审核 | ❌ **未进行** | 上线前阻断项（见 §2.1） |
+| 热线号码拨打核验 | ❌ **未进行** | 上线前阻断项（见 §2.2） |
+
+**一句话结论**：功能、质量门禁、可访问性都已完成，**但仍不能直接面向真实用户上线** ——
+差的是**内容审核**和**号码核验**，这两件事必须由有资质的人做，不是写代码能解决的。
+
+**一键跑全部门禁**：`npm run check`
+（= `typecheck:all` + `test` + `build` + `validate` + `e2e` + `a11y` + `perf`，7 条串起来，exit 0 即全绿）。
+
+> ⚠️ 这条命令曾经是「typecheck + test + build」三条，而 CONTRACT §7 里
+> 「首屏可交互」一行的验证方式写着 `scripts/audit/perf.ts` —— **那个文件从来不存在**，
+> `npm run perf` 一直抛 `MODULE_NOT_FOUND`。因为没人跑，所以没人发现。
+> 现在脚本补上了、也接进了 `check`，并且做了一次变异（把判失败线改成 1ms）
+> 确认它真的会红。详见 `TESTING.md §4.7「幽灵门禁」`。
+>
+> 顺手把整个 `scripts/` 和 `docs/` 扫了一遍，又挖出 **6 处「在跑但结论不可信」**
+> 的检查并全部修掉（滑杆值被静默 clamp、断言目标被删除后改名、
+> testid 语义漂移、指标方向反了等）。完整审计报告在 `tmp/ghost-gates-report.md`，
+> 六种变体的规避规则见 `TESTING.md §4.7.1`。
+>
+> 这一轮最值得记住的一句：**一个从来没见它红过的门禁，不能算门禁。**
 
 ---
 
@@ -58,39 +82,118 @@
 
 ## 三、技术债（按优先级）
 
-### P0 · 计分引擎单元测试
+> **v2.0 更新（2026-10）**：本节原列为 P0–P3 的四项技术债**已全部清偿**，
+> 下面保留原始描述是为了让接手者知道「曾经坏在哪里」以及**怎么验证它没坏回去**。
+> 未清偿的项已移入 §3.5。
 
-这是全站**最容易出错、出错后果最严重**的地方。当前 `src/scales/scoring.ts` 没有任何测试。
+### P0 · 计分引擎单元测试 —— ✅ 已清偿
 
-至少覆盖：
+**原状**：`src/scales/scoring.ts` 零测试，而这是全站出错后果最严重的地方。
 
-1. **反向计分**：PSS-10 的第 4/5/7/8 题、RSES 的 5 道反向题，验证 `min + max - value`
-2. **区间边界**：每个 `level` 的 `min`/`max` 两端点，验证 `findLevel` 落点唯一且不重叠
-3. **极值**：全选最低档、全选最高档时的总分是否等于理论量程端点
-4. **`detectCrisis`**：PHQ-9 第 9 题 = 0 返回 false，≥ 1 返回 true，其余量表恒为 false
+**现状**：已有 **65 条断言**（`src/scales/scoring.test.ts`），覆盖原计划的全部四项：
+反向计分（PSS-10 第 4/5/7/8 题、RSES 5 道反向题，验证 `min + max - value`）、
+区间边界（`findLevel` 落点唯一且不重叠）、极值（全选最低/最高档等于量程端点）、
+`detectCrisis`（PHQ-9 第 9 题 0 → false，≥1 → true；其余量表恒 false）。
 
-建议用 Vitest。当前 `package.json` 没有测试框架，需要先引入。
+**怎么验证没坏回去**：`npx vitest run src/scales/scoring.test.ts`。
 
-### P1 · 存储层健壮性
+> ⚠️ **这里曾经写错成 `npx vitest run src/__tests__/`，而那是一个幽灵门禁。**
+>
+> `src/__tests__/` 目录里**只有 `perf.test.ts`**，41 条断言全是性能和编码体积，
+> grep `scoreScale|scoring|反向|危机` **零命中**。
+> 也就是说那条命令：
+>
+> ```
+> npx vitest run src/__tests__/   →   Tests 41 passed (41)   EXIT=0
+> ```
+>
+> 全绿、退出码 0、看起来完美 —— **但它一条计分逻辑都没测。**
+>
+> 这个比 `perf.ts` 不存在更隐蔽：`perf.ts` 会立刻抛 `MODULE_NOT_FOUND`，
+> 而这里文件在、命令成立、结果绿，只是**测的东西和它声称的毫无关系**。
+> 紧急关头正是要信任计分引擎的时候，而这个门禁在最需要它的地方失效。
+>
+> 教训：**路径写对不等于测对了。** 验证「某个模块有测试」时，
+> 要打开那个文件看一眼它 `describe` 的是什么，别只看它绿不绿。
 
-`src/lib/storage.ts` 有两个已知边界：
 
-- **损坏 JSON**：`readJSON` 已 try/catch 返回 fallback，但没有测试覆盖
-- **配额溢出**：`persist()` 捕获异常后只 `console.warn`，用户界面上**没有任何提示**——用户会以为存上了
-- **沙盘快照无上限**：每次保存都是完整 `items` 数组，重度用户理论上可能触及 5 MB 配额
+### P1 · 存储层健壮性 —— ✅ 已清偿
 
-建议：给 `writeJSON` 增加失败回调，在 UI 上以 toast 明确告知"这次没存上"。
+**原状**：三个边界都没处理 —— 损坏 JSON 无测试；配额溢出只 `console.warn`、
+用户以为存上了；沙盘快照无上限。
 
-### P2 · 无障碍
+**现状**（`src/lib/storage.ts`）：
+- `persist()` 返回 `boolean`，`writeJSON()` 透传；集合 API 的
+  `add/upsert/update/remove/clear` **全部返回 `boolean`**，UI 可据此弹 toast。
+  **这是破坏性变更**：返回值从 `void` 改成 `boolean`，新代码别写成
+  `expect(...).toBeUndefined()`。
+- 写入失败时**不填** `snapshotCache`，保证内存快照与磁盘不分叉
+  （历史缺陷：写失败后内存里有、磁盘上没有，表现为「界面显示已保存、刷新后消失」）。
+- 跨标签页 `storage` 事件改为**先 `invalidate` 再 `emit`**
+  （历史缺陷：只 emit 不失效，订阅者被唤醒却仍命中旧缓存，界面永不更新）。
+- 损坏 JSON 有测试覆盖，`readJSON` 的 `try/catch` 返回 fallback。
 
-- 键盘流程只做了沙盘（方向键微调 / Delete 删除）和量表（数字键选择 / ← → 切题）
-- 呼吸动画依赖 `scale()` 变换，`usePreferences().reducedMotion` 已接入 `html[data-reduced-motion]`，但**没有实际生效的系统级检测**——目前只能手动开关
-- 对比度未用工具实测
+**怎么验证没坏回去**：`npx vitest run src/lib/storage.test.ts`（46 条，含 3 条
+「原缺陷，已修复」的反向回归；它们**故意写成会失败的样子**来描述旧行为）。
 
-### P3 · 性能
+### P2 · 无障碍 —— ✅ 已清偿
 
-- 单个 JS chunk 434 kB（gzip 141 kB）。若在意首屏，可对 `/sandbox` 与 `/toolbox/*` 做路由级 `lazy()`
-- 沙盘拖拽每次 `pointermove` 都触发一次 `setState` + 全量 map。摆件很多时（>50）可能掉帧，建议加 `requestAnimationFrame` 节流
+**原状**：键盘流程只覆盖沙盘与量表；`reducedMotion` 只接了手动开关、没有系统级检测；
+对比度未用工具实测。
+
+**现状**：
+- `scripts/audit/a11y.ts` 用真实 Chrome 审计 5 条路由，
+  **critical 0 项、warning 0 项、exit 0**。曾经的历史存量
+  （对比度 122、触摸目标 152、form-label 2）全部清零，基线已收窄为
+  `entries: []`（`scripts/audit/a11y-baseline.json`）。
+- `prefers-reduced-motion` **系统级检测已验证真实生效**：5 条路由的动效元素
+  分别 53/34/**68**/28/60 → 全部降为 0（实测 3 次，sandbox 是 68 不是 58）。
+- `scripts/dev/` 下有对比度计算器（`contrast.mjs`）与色板反解脚本
+  （`palette.mjs` / `palette-tier.mjs`），改色板后可复算。
+
+**两个必须知道的约定**（`docs/CONTRACT.md` §7 有详述）：
+1. **44px 指元素盒子**，不是视觉命中区。**不能用伪元素 `inset:-6px` 取巧** ——
+   审计量 `getBoundingClientRect()`，伪元素溢出不计入，数字一点不降。
+2. 色板必须按**最深背景** `--sand-300 (#e4dccb)` 反解。按 `--sand-200`
+   解出来的颜色在真实页面上仍会不达标。
+3. 三级灰阶（`--ink-300/400/500`）之间要留 **>2.5% 相对亮度差**，
+   否则全部压到 4.5:1 会挤成同一个灰、层级消失。
+
+**怎么验证没坏回去**：
+```bash
+npx vite build   # 必须先构建，审计跑的是 dist
+node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
+```
+
+### P3 · 性能 —— ✅ 已清偿
+
+**原状**：单 chunk 434 kB（gzip 141 kB）；沙盘拖拽每次 `pointermove` 都 `setState`。
+
+**现状**：
+- 路由级 `lazy()` 已完成（`src/App.tsx`），`three` 走动态 `import()` 独立 chunk。
+- 主包 gzip **140.7 kB**，预算 175 kB。断言它的是 **`src/__tests__/perf.test.ts`**（`dist/` 存在时逐文件校验体积预算）。
+  ⚠️ 这里原写「`--report-only` 之外的 E2E 也断言了这点」——**E2E 里没有任何体积断言**，
+  `smoke.ts` 里唯一提到 gzip 的地方是一句注释。文档把守卫记在了错的门禁名下，
+  后果是有人想确认「体积真的被守住了」时，会去看 `smoke.ts` 然后什么也找不到。
+- 拖拽/笔刷已 rAF 节流；`replayAll` 的 O(n²) 已消除（4000 条 **53.5ms → 1.3ms**）；
+  `computeSessionStats` 无 surface 场景 **72.6ms → 1.3ms**。
+
+**性能断言的采样陷阱**（重要）：并行跑测试时 CPU 被打满，
+**干扰只会让耗时变长、永远不会变短**，所以绝对预算断言要用**最小值**
+（`bestMs`）而非中位数 —— 中位数会把抢占算进去，曾经导致
+`perf-scale.test.ts` 6 次全量挂 3 次。标度（比值）断言仍用中位数，
+因为用最小值会让分母贴近 0、比值反而失真。
+
+### 3.5 仍未清偿的项
+
+- **`docs/TESTING.md` 之外没有 CI**：所有门禁靠手工执行。接入 CI 时注意
+  a11y 审计需要真实 Chrome（`puppeteer-core`，路径见 `scripts/audit/a11y.ts` 顶部）。
+- **`src/sandbox/SandboxCanvas.tsx` 是死代码**（已被 `src/sandbox/render/` 取代，
+  全仓无引用），保留仅为减少一次性 diff 风险，可安全删除。
+- **`src/sandbox/render/three.tsx` 不支持拖动/缩放/旋转**（只能点击选中）。
+  这是**刻意的**：3D 是可选视图，拖动交互在 2.5D 里做。3D 视图有明确提示。
+- **沙盘会话体积无硬上限**（仅 `MAX_EVENTS = 4000` 软约束）。重度使用理论上
+  可能触及 localStorage 5MB 配额；写入失败现在会被感知（见 P1），但不会自动清理。
 
 ---
 

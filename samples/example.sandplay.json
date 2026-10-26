@@ -1,0 +1,74 @@
+{
+  "format": "sandplay-session/v1",
+  "version": 1,
+  "exportedAt": "2026-10-26T14:32:10.000Z",
+  "producer": {
+    "app": "心屿 Xinyu",
+    "version": "2.0.0"
+  },
+  "session": {
+    "id": "session_example_0001",
+    "createdAt": "2026-10-26T14:20:00.000Z",
+    "title": "示例沙盘 · 一棵树和一片海",
+    "mode": "self",
+    "sceneId": "beach",
+    "locked": true,
+    "lockedAt": "2026-10-26T14:32:00.000Z",
+    "items": [
+      {
+        "id": "item_0001",
+        "symbolId": "tree",
+        "x": 0.42,
+        "y": 0.58,
+        "scale": 1.2,
+        "rotation": 0,
+        "z": 1,
+        "note": "它比我想的更老一些。",
+        "affectLabels": ["孤独", "温暖"],
+        "burial": 0
+      }
+    ],
+    "events": [
+      {
+        "t": 0,
+        "type": "session.start",
+        "payload": {
+          "sceneId": "beach",
+          "mode": "self"
+        }
+      },
+      {
+        "t": 4200,
+        "type": "item.add",
+        "itemId": "item_0001",
+        "payload": {
+          "item": {
+            "id": "item_0001",
+            "symbolId": "tree",
+            "x": 0.42,
+            "y": 0.58,
+            "scale": 1.2,
+            "rotation": 0,
+            "z": 1
+          }
+        }
+      },
+      {
+        "t": 15800,
+        "type": "item.note",
+        "itemId": "item_0001",
+        "payload": {
+          "note": "它比我想的更老一些。"
+        }
+      }
+    ],
+    "surface": {
+      "cols": 128,
+      "rows": 96,
+      "height": "UzEBgABgAAEAAABagGA=",
+      "state": "dry",
+      "waterAdded": 0
+    },
+    "reflection": "摆完之后觉得安静了一点，没有想解释什么。"
+  }
+}

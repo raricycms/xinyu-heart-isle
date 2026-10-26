@@ -30,3 +30,16 @@ dist-ssr
 .deep-link.cjs
 .serve-dist.cjs
 *.png.tmp
+
+# 一次性排查用的临时文件与探针（非门禁、非产品代码）
+# tmp/ 下有审计用的变异副本、运行日志、临时探针，全部是可丢弃的
+tmp/
+tmp-a11y.json
+tmp-a11y.txt
+
+# E2E / 视觉脚本产出的截图
+scripts/e2e/screenshots/
+
+# 部署与运维脚本：含服务器 IP、nginx 备份路径等环境信息，
+# 与产品代码无关，也不要让它们进 npm 包或公开仓库。
+.deploy/

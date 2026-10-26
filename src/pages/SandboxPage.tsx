@@ -1,553 +1,543 @@
-import { useCallback, useMemo, useState } from 'react';
-import { Button } from '@/components/ui/Button';
-import { Card, PageHeader, SectionHead } from '@/components/ui/Card';
-import { Empty, Notice, Tag } from '@/components/ui/Primitives';
-import { sandboxStore, STORAGE_KEYS, useCollection } from '@/lib/storage';
-import { createId } from '@/lib/id';
-import { formatDateTime, nowISO } from '@/lib/date';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Card } from '@/components/ui/Card';
+import { Notice } from '@/components/ui/Primitives';
 import { useToast } from '@/lib/toast';
-import { clamp, cx } from '@/lib/utils';
-import type { SandboxItem, SandboxSnapshot, SceneId } from '@/lib/types';
-import { SCENES } from '@/sandbox/scenes';
-import {
-  SYMBOLS,
-  categoryLabels,
-  getSymbolById,
-  pickPrompts,
-  symbolGlyph,
-  symbolLabel,
-  symbolsByCategory,
-} from '@/sandbox/symbols';
-import { SandboxCanvas } from '@/sandbox/SandboxCanvas';
-import '@/styles/sandbox.css';
+import { usePreferences } from '@/lib/storage';
+import { clamp } from '@/lib/utils';
+import { createId } from '@/lib/id';
+import { getSession, saveSession, useSessions } from '@/lib/sessionStore';
+import type { RendererKind, SandboxItem, SurfaceTool } from '@/lib/types';
+import { useSandboxSession } from '@/sandbox/useSandboxSession';
+import { replay } from '@/sandbox/events';
+import { forkSessionAt, parseResumeParams } from '@/sandbox/replay/resume';
+import { SandRendererSwitch } from '@/sandbox/render';
+import { symbolLabel } from '@/sandbox/symbols';
+import { SymbolTray } from '@/sandbox/library/SymbolTray';
+import { usePackImageMap } from '@/sandbox/library';
+import { Toolbar } from '@/sandbox/workbench/Toolbar';
+import { Inspector } from '@/sandbox/workbench/Inspector';
+import { PromptCard, SavePanel, LockDialog, SandboxAffect } from '@/sandbox/workbench/SidePanels';
+import { SurfaceToolbar, SilenceToggle } from '@/sandbox/surface';
+import { renderThumbnail } from '@/sandbox/thumbnail';
+import { useI18n } from '@/i18n';
+import '@/styles/sandbox-workbench.css';
 
-const MAX_Z = 999;
+/**
+ * 沙盘工作台（v2）。
+ *
+ * 结构：
+ *   顶栏（模式/场景/渲染器/撤销/保存）
+ *   ├ 左栏：沙具库（SymbolTray，symbol-dev 提供）
+ *   ├ 舞台：渲染器 + 沙面工具条 + 检查器浮层
+ *   └ 右栏：引导语 / 感受 / 保存
+ *
+ * 关键设计决策：
+ * 1. **单一真相**：所有状态在 `useSandboxSession` 的事件流里，页面只读不写。
+ * 2. **静默模式**（focus）是一等公民：一键隐藏所有面板，Esc 退出。
+ * 3. **封盘不可逆**：锁定后所有编辑入口同时禁用，但过程与文字仍可查看/导出。
+ * 4. 沙面笔刷走 rAF 节流，松手才提交一笔（不污染事件流）。
+ */
 
-/** 拖拽之外的工具栏操作：新增、缩放、旋转、层级 */
+/*
+ * 沙面工具的 7 个条目（含字形与 i18n key）已移到
+ * `src/sandbox/surface/SurfaceToolbar.tsx` 的 `SURFACE_TOOL_LIST`。
+ * 这里曾经有一份重复定义的 `SURFACE_TOOLS`——两个来源迟早会漂移
+ * （改了一个忘了另一个），而且字形 `🪮` 这类 emoji 在不同字体下渲染不一致，
+ * 只该有一个地方说了算。
+ */
+
 export default function SandboxPage() {
-  const snapshots = useCollection<SandboxSnapshot>(STORAGE_KEYS.sandbox);
+  const { t } = useI18n();
   const { show } = useToast();
+  const prefs = usePreferences();
+  const sessions = useSessions();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [items, setItems] = useState<SandboxItem[]>([]);
-  const [sceneId, setSceneId] = useState<SceneId>('beach');
+  const api = useSandboxSession({ initialMode: 'self' });
+  /** 沙具包图片表：图片型沙具在沙盘上要画成图片，不能退化成占位符 */
+  const packImages = usePackImageMap();
+
+  /* ------------------------------ 本地 UI 状态 ------------------------------ */
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState<string>('nature');
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [renderer, setRenderer] = useState<RendererKind>(prefs?.renderer ?? 'iso2d');
+  /** 专注模式：只留沙盘（不属于持久化偏好） */
+  const [focusMode, setFocusMode] = useState(false);
+  const [tool, setTool] = useState<SurfaceTool | null>(null);
+  const [radius, setRadius] = useState(0.12);
+  const [strength, setStrength] = useState(0.6);
+  const [promptSeed, setPromptSeed] = useState(() => new Date().getDate());
+  const [sandboxAffects, setSandboxAffects] = useState<string[]>([]);
   const [saveOpen, setSaveOpen] = useState(false);
-  const [title, setTitle] = useState('');
-  const [reflection, setReflection] = useState('');
-  const [libraryOpen, setLibraryOpen] = useState(false);
-  const [promptSeed] = useState(() => new Date().getDate());
+  const [lockOpen, setLockOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const restoredRef = useRef(false);
 
-  const selected = items.find((item) => item.id === selectedId) ?? null;
-  const prompts = useMemo(() => pickPrompts(promptSeed, 3), [promptSeed]);
-
-  const addSymbol = useCallback(
-    (symbolId: string) => {
-      const symbol = getSymbolById(symbolId);
-      if (!symbol) return;
-      // 稍微错开落点，避免连续添加时完全重叠
-      const nudge = (items.length % 5) * 0.05 - 0.1;
-      const next: SandboxItem = {
-        id: createId('item'),
-        symbolId,
-        x: clamp(0.5 + nudge, 0.1, 0.9),
-        y: clamp(0.55 + nudge * 0.6, 0.1, 0.9),
-        scale: 1,
-        rotation: 0,
-        z: items.length + 1,
-      };
-      setItems((prev) => [...prev, next]);
-      setSelectedId(next.id);
-    },
-    [items.length],
+  const items = api.state.items;
+  const selected = useMemo(
+    () => items.find((item) => item.id === selectedId) ?? null,
+    [items, selectedId],
   );
 
-  const updateSelected = useCallback(
+  /* --------------------------- 从 URL 续接会话 ---------------------------- */
+
+  useEffect(() => {
+    if (restoredRef.current) return;
+    const resume = parseResumeParams(searchParams);
+    if (!resume) {
+      restoredRef.current = true;
+      return;
+    }
+    const source = getSession(resume.from);
+    restoredRef.current = true;
+    if (!source) {
+      show('没有找到这次会话，已为你新建一个空白沙盘。', 'warn');
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    const total = source.events?.length ?? 0;
+    const cursor = resume.cursor === null ? total : clamp(resume.cursor, 0, total);
+    // 用纯函数重放算出「第 cursor 步」的摆件与沙面，保证复制出来的会话自洽
+    const replayed = replay(source.events ?? [], cursor);
+    const forked = forkSessionAt(source, cursor, {
+      newId: createId('sandbox'),
+      now: new Date().toISOString(),
+      replayItems: replayed.items,
+      sceneId: replayed.sceneId,
+      surface: replayed.surface,
+    });
+    api.loadSession(forked);
+    show(`已从第 ${cursor} 步接着摆，原会话没有被改动。`, 'success');
+    setSearchParams({}, { replace: true });
+    // api 的方法引用稳定，不需要进依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams, show]);
+
+  /* ------------------------------ 键盘快捷键 ------------------------------ */
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      // 输入框里不拦截
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+
+      if (event.key === 'Escape') {
+        if (focusMode) {
+          setFocusMode(false);
+          event.preventDefault();
+        } else if (selectedId) {
+          setSelectedId(null);
+          event.preventDefault();
+        }
+        return;
+      }
+
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) api.redo();
+        else api.undo();
+        return;
+      }
+      if (mod && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        if (!api.locked) setSaveOpen(true);
+        return;
+      }
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (selectedId && !api.locked) {
+          event.preventDefault();
+          api.removeItem(selectedId);
+          setSelectedId(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [api, selectedId, focusMode]);
+
+  /* -------------------------------- 操作 --------------------------------- */
+
+  const handleAddSymbol = useCallback(
+    (symbolId: string) => {
+      if (api.locked) {
+        show(t('sandbox.lockedHint'), 'warn');
+        return;
+      }
+      const id = api.addItem(symbolId);
+      if (id) setSelectedId(id);
+    },
+    [api, show, t],
+  );
+
+  const handleItemDrag = useCallback(
+    (id: string, x: number, y: number) => {
+      api.moveItem(id, clamp(x, 0, 1), clamp(y, 0, 1));
+    },
+    [api],
+  );
+
+  const handleSurfaceStroke = useCallback(
+    (strokeTool: SurfaceTool, points: Array<{ x: number; y: number }>) => {
+      if (api.locked) return;
+      api.strokeSurface(strokeTool, points, radius, strength);
+    },
+    [api, radius, strength],
+  );
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    try {
+      const base = api.toSession();
+      // 缩略图在这里生成：档案页与记录单的「导出图片」都依赖它。
+      // 用数据重画而不是截 canvas，是为了让三种渲染器（doms/iso/three）结果一致。
+      const thumbnail = renderThumbnail(base) ?? base.thumbnail;
+      const session = api.toSession(thumbnail ? { thumbnail } : undefined);
+      const ok = await saveSession({
+        ...session,
+        meta: { ...session.meta, sandboxAffects },
+      });
+      if (!ok) {
+        show('保存失败：浏览器存储空间可能已满。可以先导出再清理。', 'warn');
+        return;
+      }
+      setSaveOpen(false);
+      show('沙盘已保存在这台设备上。', 'success');
+    } catch {
+      show('保存失败：浏览器存储空间可能已满。可以先导出再清理。', 'warn');
+    } finally {
+      setSaving(false);
+    }
+  }, [api, sandboxAffects, show]);
+
+  const handleLock = useCallback(() => {
+    api.lock();
+    setLockOpen(false);
+    setSelectedId(null);
+    show('已封盘。这个沙盘不会再被改动了。', 'success');
+  }, [api, show]);
+
+  const handleNew = useCallback(() => {
+    if (api.dirty && !window.confirm(t('sandbox.confirmDiscard'))) return;
+    api.reset();
+    setSelectedId(null);
+    setSandboxAffects([]);
+    show('已新建一个空白沙盘。', 'success');
+  }, [api, show, t]);
+
+  const handleSceneChange = useCallback(
+    (sceneId: string) => {
+      api.setScene(sceneId);
+    },
+    [api],
+  );
+
+  const handleItemChange = useCallback(
     (patch: Partial<SandboxItem>) => {
       if (!selectedId) return;
-      setItems((prev) =>
-        prev.map((item) => (item.id === selectedId ? { ...item, ...patch } : item)),
-      );
+      if (patch.scale !== undefined) api.scaleItem(selectedId, patch.scale);
+      if (patch.rotation !== undefined) api.rotateItem(selectedId, patch.rotation);
+      if (patch.burial !== undefined) api.setItemBurial(selectedId, patch.burial);
+      if (patch.note !== undefined) api.setItemNote(selectedId, patch.note);
+      if (patch.affectLabels !== undefined) api.setItemAffect(selectedId, patch.affectLabels);
     },
-    [selectedId],
+    [api, selectedId],
   );
 
   const bringToFront = useCallback(() => {
     if (!selectedId) return;
     const maxZ = items.reduce((max, item) => Math.max(max, item.z), 0);
-    updateSelected({ z: Math.min(maxZ + 1, MAX_Z) });
-  }, [items, selectedId, updateSelected]);
+    api.setItemLayer(selectedId, maxZ + 1);
+  }, [api, items, selectedId]);
 
   const sendToBack = useCallback(() => {
     if (!selectedId) return;
     const minZ = items.reduce((min, item) => Math.min(min, item.z), Infinity);
-    updateSelected({ z: Math.max(minZ - 1, 1) });
-  }, [items, selectedId, updateSelected]);
-
-  const deleteSelected = useCallback(() => {
-    if (!selectedId) return;
-    setItems((prev) => prev.filter((item) => item.id !== selectedId));
-    setSelectedId(null);
-  }, [selectedId]);
+    api.setItemLayer(selectedId, Math.max(1, minZ - 1));
+  }, [api, items, selectedId]);
 
   const duplicateSelected = useCallback(() => {
     if (!selected) return;
-    const copy: SandboxItem = {
-      ...selected,
-      id: createId('item'),
-      x: clamp(selected.x + 0.05, 0.05, 0.95),
-      y: clamp(selected.y + 0.05, 0.05, 0.95),
-      z: items.reduce((max, item) => Math.max(max, item.z), 0) + 1,
-    };
-    setItems((prev) => [...prev, copy]);
-    setSelectedId(copy.id);
-  }, [items, selected]);
-
-  const resetCanvas = useCallback(() => {
-    if (items.length > 0) {
-      const ok = window.confirm('新建会清空当前画布上还没保存的摆放，确定吗？');
-      if (!ok) return;
-    }
-    setItems([]);
-    setSelectedId(null);
-    setReflection('');
-    setTitle('');
-  }, [items.length]);
-
-  const openSave = useCallback(() => {
-    if (items.length === 0) {
-      show('先放几个象征物再保存吧。', 'warn');
-      return;
-    }
-    setTitle((prev) => prev || `我的沙盘 ${new Date().getMonth() + 1}/${new Date().getDate()}`);
-    setSaveOpen(true);
-  }, [items.length, show]);
-
-  const confirmSave = useCallback(() => {
-    const trimmed = title.trim();
-    if (!trimmed) {
-      show('给它起个名字吧，之后会更好找。', 'warn');
-      return;
-    }
-    sandboxStore.add({
-      id: createId('sandbox'),
-      at: nowISO(),
-      title: trimmed,
-      items: items.map((item) => ({ ...item })),
-      sceneId,
-      reflection: reflection.trim() || undefined,
-      prompts,
+    // 复制 = 用同 symbolId 在原位置偏移处新增
+    const id = api.addItem(selected.symbolId, {
+      x: clamp(selected.x + 0.06, 0.05, 0.95),
+      y: clamp(selected.y + 0.06, 0.05, 0.95),
     });
-    setSaveOpen(false);
-    show('沙盘已保存。', 'success');
-  }, [items, prompts, reflection, sceneId, show, title]);
+    if (id) {
+      api.scaleItem(id, selected.scale);
+      api.rotateItem(id, selected.rotation);
+      setSelectedId(id);
+    }
+  }, [api, selected]);
 
-  const loadSnapshot = useCallback((snapshot: SandboxSnapshot) => {
-    setItems(snapshot.items.map((item) => ({ ...item })));
-    setSceneId((snapshot.sceneId as SceneId) ?? 'beach');
-    setReflection(snapshot.reflection ?? '');
-    setTitle(snapshot.title);
-    setSelectedId(null);
-    setLibraryOpen(false);
-    show(`已打开「${snapshot.title}」。`, 'success');
-  }, [show]);
-
-  const removeSnapshot = useCallback(
-    (id: string) => {
-      const ok = window.confirm('删除这个沙盘快照？删除后无法恢复。');
-      if (!ok) return;
-      sandboxStore.remove(id);
-      show('已删除该快照。');
-    },
-    [show],
-  );
-
-  const editNoteTarget = items.find((item) => item.id === editingId) ?? null;
+  /* -------------------------------- 渲染 --------------------------------- */
 
   return (
-    <div className="page page--wide">
-      <PageHeader
-        eyebrow="Cyber Sand Tray"
-        title="赛博沙盘"
-        subtitle="把说不清的东西摆出来。不用会画画，也不用解释得通——先摆，意义可以之后再说。"
-        action={
-          <div className="btn-group">
-            <Button variant="ghost" size="sm" onClick={() => setLibraryOpen((v) => !v)}>
-              {libraryOpen ? '收起快照' : `快照${snapshots.length > 0 ? `（${snapshots.length}）` : ''}`}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={resetCanvas}>
-              新建
-            </Button>
-            <Button size="sm" onClick={openSave}>
-              保存沙盘
-            </Button>
-          </div>
-        }
+    <div className={`wb${focusMode ? ' wb--focus' : ''}`}>
+      <Toolbar
+        title={api.title}
+        onTitleChange={api.setTitle}
+        mode={api.mode}
+        onModeChange={api.setMode}
+        sceneId={api.state.sceneId}
+        onSceneChange={handleSceneChange}
+        renderer={renderer}
+        onRendererChange={setRenderer}
+        dirty={api.dirty}
+        locked={api.locked}
+        canUndo={api.canUndo}
+        canRedo={api.canRedo}
+        onUndo={api.undo}
+        onRedo={api.redo}
+        onSave={() => setSaveOpen(true)}
+        onLock={() => setLockOpen(true)}
+        onNew={handleNew}
+        sessionCount={sessions.length}
       />
 
-      <Notice tone="teal" icon="◍">
-        沙盘没有"正确的摆法"。系统不会分析你的作品，也不会给出解释——它只是帮你把内在的画面放到外面，
-        让你能看见它。
-      </Notice>
+      {/*
+        专注模式入口。
+        放在顶部栏**下方**、主内容上方，让它始终在视口内可见：
+        - 平常态：右对齐的一行，点它进入专注模式；
+        - 专注态：`--floating` 改成 `position: fixed` 钉在右下角，
+          因为此时下面整块 `.wb-main` 都不渲染了，没有流式位置可占。
+        曾经的坑：把它放在页面最末尾，结果 y=1100 落在视口外，
+        用户进了专注模式就**找不到出口**（只能猜 Esc）。出口不能藏。
+      */}
+      <SilenceToggle
+        silent={focusMode}
+        onSilentChange={setFocusMode}
+        disabled={api.locked}
+        className={focusMode ? 'wb-silence wb-silence--floating' : 'wb-silence'}
+      />
 
-      <div className="sandbox-layout mt-4">
-        {/* ------------------------------- 素材面板 ------------------------------- */}
-        <aside className="sandbox-panel" aria-label="象征物素材库">
-          <div className="sandbox-panel__tabs" role="tablist" aria-label="象征物分类">
-            {symbolsByCategory().map((group) => (
-              <button
-                key={group.category}
-                type="button"
-                role="tab"
-                aria-selected={activeCategory === group.category}
-                className={cx('sandbox-panel__tab', activeCategory === group.category && 'is-active')}
-                onClick={() => setActiveCategory(group.category)}
-              >
-                {group.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="sandbox-panel__grid">
-            {symbolsByCategory()
-              .find((group) => group.category === activeCategory)
-              ?.items.map((symbol) => (
-                <button
-                  key={symbol.id}
-                  type="button"
-                  className="sandbox-symbol"
-                  onClick={() => addSymbol(symbol.id)}
-                  title={`添加「${symbol.label}」`}
-                >
-                  <span className="sandbox-symbol__glyph" aria-hidden>
-                    {symbol.glyph}
-                  </span>
-                  <span className="sandbox-symbol__label">{symbol.label}</span>
-                </button>
-              ))}
-          </div>
-
-          <p className="sandbox-panel__count small muted">
-            共 {SYMBOLS.length} 个象征物 · {Object.keys(categoryLabels).length} 类
-          </p>
-        </aside>
-
-        {/* -------------------------------- 画布 -------------------------------- */}
-        <section className="sandbox-stage" aria-label="沙盘画布区">
-          <div className="sandbox-toolbar">
-            <div className="sandbox-toolbar__scenes" role="group" aria-label="场景主题">
-              {SCENES.map((scene) => (
-                <button
-                  key={scene.id}
-                  type="button"
-                  className={cx('sandbox-scene-btn', sceneId === scene.id && 'is-active')}
-                  onClick={() => setSceneId(scene.id)}
-                  title={`切换到「${scene.label}」`}
-                >
-                  <span className="sandbox-scene-btn__dot" style={{ background: scene.background }} aria-hidden />
-                  {scene.label}
-                </button>
-              ))}
+      <main className="wb-main">
+        {/* 左栏：沙具库 —— symbol-dev 的 SymbolTray 通过稳定 props 接入 */}
+        <div className="wb-col wb-col--lib">
+          <Card className="wb-card">
+            <div className="wb-card__head">
+              <strong>{t('sandbox.library')}</strong>
+              <span className="small muted" data-testid="sandbox-item-count">{items.length} 件在场</span>
             </div>
-            <span className="small muted mono">{items.length} 个摆件</span>
-          </div>
+            <SymbolTray
+              onPick={handleAddSymbol}
+              value={selectedId}
+              disabled={api.locked}
+            />
+          </Card>
 
-          <SandboxCanvas
-            items={items}
-            sceneId={sceneId}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onChangeItems={setItems}
-            onEditNote={(item) => {
-              setSelectedId(item.id);
-              setEditingId(item.id);
-            }}
-          />
+          <PromptCard seed={promptSeed} onRefresh={() => setPromptSeed((n) => n + 1)} />
+        </div>
 
-          {/* 选中项控制条 */}
-          {selected ? (
-            <div className="sandbox-inspector" aria-label="摆件调整">
-              <span className="sandbox-inspector__name">
-                <span aria-hidden>{symbolGlyph(selected.symbolId)}</span>
-                {symbolLabel(selected.symbolId)}
-              </span>
-              <label className="sandbox-inspector__field">
-                <span>大小</span>
-                <input
-                  type="range"
-                  className="range"
-                  min={0.5}
-                  max={2}
-                  step={0.05}
-                  value={selected.scale}
-                  onChange={(e) => updateSelected({ scale: Number(e.target.value) })}
-                />
-              </label>
-              <label className="sandbox-inspector__field">
-                <span>角度</span>
-                <input
-                  type="range"
-                  className="range"
-                  min={-180}
-                  max={180}
-                  step={5}
-                  value={selected.rotation}
-                  onChange={(e) => updateSelected({ rotation: Number(e.target.value) })}
-                />
-              </label>
-              <div className="btn-group">
-                <Button variant="quiet" size="sm" onClick={sendToBack} title="放到最底层">
-                  下移层
-                </Button>
-                <Button variant="quiet" size="sm" onClick={bringToFront} title="放到最上层">
-                  上移层
-                </Button>
-                <Button variant="quiet" size="sm" onClick={() => setEditingId(selected.id)}>
-                  写注释
-                </Button>
-                <Button variant="quiet" size="sm" onClick={duplicateSelected}>
-                  复制
-                </Button>
-                <Button variant="danger" size="sm" onClick={deleteSelected}>
-                  删除
-                </Button>
+        {/* 舞台 */}
+        <div className="wb-col wb-col--stage">
+          <div className="wb-stage" data-testid="sandbox-stage">
+            <div className="wb-stage__badge">
+              <span>{t(`sandbox.scene.${api.state.sceneId}` as const) ?? api.state.sceneId}</span>
+              <span aria-hidden="true">·</span>
+              <span>{api.locked ? t('sandbox.locked') : t(`sandbox.phase.${api.state.phase}` as const)}</span>
+            </div>
+
+            <SandRendererSwitch
+              renderer={renderer}
+              items={items}
+              sceneId={api.state.sceneId}
+              selectedId={selectedId}
+              surface={api.surface}
+              readOnly={api.locked}
+              imageMap={packImages}
+              reducedMotion={prefs?.reducedMotion ?? false}
+              outlineMode={prefs?.outlineMode ?? false}
+              brush={
+                tool && !api.locked
+                  ? { x: 0.5, y: 0.5, radius, tool, active: false }
+                  : null
+              }
+              onSelect={setSelectedId}
+              onItemDrag={handleItemDrag}
+              onItemCommit={(id) => {
+                const item = items.find((entry) => entry.id === id);
+                if (item) api.commitMove(id, { x: item.x, y: item.y }, { x: item.x, y: item.y });
+              }}
+              onItemActivate={(item) => setSelectedId(item.id)}
+              onSurfaceStroke={handleSurfaceStroke}
+              onCanvasClick={() => setSelectedId(null)}
+            />
+
+            {items.length === 0 && !api.locked ? (
+              <div className="wb-stage__empty">
+                <span className="wb-stage__empty-glyph" aria-hidden="true">
+                  ⛱
+                </span>
+                <p className="small">{t('sandbox.emptyTray')}</p>
               </div>
-            </div>
-          ) : (
-            <p className="sandbox-tip small muted">
-              点选一个摆件可以调整大小与角度；双击摆件可以写一句注释。
-              也可以用方向键微调、Delete 删除。
-            </p>
-          )}
-        </section>
+            ) : null}
 
-        {/* ------------------------------ 右侧栏 ------------------------------ */}
-        <aside className="sandbox-side">
-          <Card padSm>
-            <SectionHead title="自我探索提示" desc="不急着回答，看看哪句让你停了一下。" />
-            <ul className="sandbox-prompts">
-              {prompts.map((prompt) => (
-                <li key={prompt} className="sandbox-prompts__item">
-                  {prompt}
-                </li>
-              ))}
-            </ul>
-          </Card>
+            {/*
+              沙面工具条：使用 `src/sandbox/surface/SurfaceToolbar` 组件。
+              早期这里是一段内联的 `.wb-surfacebar`，功能等价但：
+                - 触摸目标只有 31.5px，不满足 CONTRACT §7 的 44px；
+                - 半径/力度滑块被拆到页面下方另一个 `.wb-brushbar`，操作要来回看；
+                - 重铺整盘沙用的是 `window.confirm`，与站点其他确认框风格不一致。
 
-          <Card padSm>
-            <SectionHead title="这次想记下什么" desc="可留空。" />
-            <label className="sr-only" htmlFor="sandbox-reflection">
-              自我解读
-            </label>
-            <textarea
-              id="sandbox-reflection"
-              className="textarea"
-              style={{ minHeight: 96 }}
-              placeholder="例如：我把它放得很远，因为我不想再看到它。"
-              value={reflection}
-              maxLength={300}
-              onChange={(e) => setReflection(e.target.value)}
-            />
-          </Card>
-
-          <Card padSm>
-            <SectionHead title="我的沙盘" action={<Tag tone="plain">{snapshots.length}</Tag>} />
-            {snapshots.length === 0 ? (
-              <p className="small muted">
-                还没有保存过。摆好之后点右上角「保存沙盘」。
-              </p>
-            ) : (
-              <ul className="sandbox-snapshots">
-                {snapshots.slice(0, 6).map((snapshot) => (
-                  <li key={snapshot.id} className="sandbox-snapshot">
-                    <button
-                      type="button"
-                      className="sandbox-snapshot__main"
-                      onClick={() => loadSnapshot(snapshot)}
-                    >
-                      <span className="sandbox-snapshot__title">{snapshot.title}</span>
-                      <span className="sandbox-snapshot__meta small muted">
-                        {formatDateTime(snapshot.at)} · {snapshot.items.length} 个摆件
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="sandbox-snapshot__del"
-                      aria-label={`删除「${snapshot.title}」`}
-                      onClick={() => removeSnapshot(snapshot.id)}
-                    >
-                      ✕
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </aside>
-      </div>
-
-      {/* ------------------------------ 快照抽屉 ------------------------------ */}
-      {libraryOpen ? (
-        <Card className="mt-4">
-          <SectionHead
-            title="全部快照"
-            action={
-              <Button variant="quiet" size="sm" onClick={() => setLibraryOpen(false)}>
-                收起
-              </Button>
-            }
-          />
-          {snapshots.length === 0 ? (
-            <Empty
-              icon="◌"
-              title="还没有快照"
-              desc="保存之后会出现在这里，可以随时重新打开继续摆。"
-            />
-          ) : (
-            <div className="grid grid--3">
-              {snapshots.map((snapshot) => (
-                <div key={snapshot.id} className="sandbox-card">
-                  <div className="sandbox-card__head">
-                    <strong>{snapshot.title}</strong>
-                    <Tag tone="plain">{snapshot.items.length} 件</Tag>
-                  </div>
-                  <p className="small muted">{formatDateTime(snapshot.at)}</p>
-                  <div className="sandbox-card__preview" aria-hidden>
-                    {snapshot.items.slice(0, 12).map((item) => (
-                      <span
-                        key={item.id}
-                        style={{
-                          left: `${item.x * 100}%`,
-                          top: `${item.y * 100}%`,
-                          fontSize: `${10 + item.scale * 4}px`,
-                        }}
-                      >
-                        {symbolGlyph(item.symbolId)}
-                      </span>
-                    ))}
-                  </div>
-                  {snapshot.reflection ? (
-                    <p className="small sandbox-card__reflection">{snapshot.reflection}</p>
-                  ) : null}
-                  <div className="btn-group mt-2">
-                    <Button variant="ghost" size="sm" onClick={() => loadSnapshot(snapshot)}>
-                      打开
-                    </Button>
-                    <Button variant="danger" size="sm" onClick={() => removeSnapshot(snapshot.id)}>
-                      删除
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      ) : null}
-
-      {/* ------------------------------- 保存弹层 ------------------------------- */}
-      {saveOpen ? (
-        <div className="sandbox-modal" role="dialog" aria-modal="true" aria-label="保存沙盘">
-          <div className="sandbox-modal__panel">
-            <h2 className="card-title">保存这个沙盘</h2>
-            <p className="card-desc mt-2">
-              起个名字方便之后回看。你的自我解读也会一起保存。
-            </p>
-            <div className="field mt-4">
-              <label className="field-label" htmlFor="sandbox-title">
-                标题
-              </label>
-              <input
-                id="sandbox-title"
-                className="input"
-                value={title}
-                maxLength={40}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="例如：周三晚上"
+              专注态用组件的 `silent` 属性（整条返回 null），而不是在外面写
+              `!focusMode ? ... : null`：组件内部会把「正在等二次确认重铺」的状态
+              一起清掉，避免退出专注后看到一个悬了很久的确认按钮。
+            */}
+            {!api.locked ? (
+              <SurfaceToolbar
+                tool={tool}
+                /*
+                 * 选沙面工具时顺手取消摆件选中。
+                 *
+                 * 这两个是**互斥的操作模式**：手里拿着铲子在沙上画，
+                 * 就不该同时开着「这块石头的大小/角度/埋深」面板 ——
+                 * 面板会盖住工具条右侧的滑块，而屏幕小的时候几乎必盖。
+                 *
+                 * 纯 CSS 提 z-index 能解决遮挡，但解决不了「同时在做两件事」的
+                 * 交互混乱：用户会不知道下一笔是画沙还是拖摆件。
+                 * 所以模式切换时主动收敛状态。
+                 */
+                onToolChange={(next) => {
+                  setTool(next);
+                  if (next) setSelectedId(null);
+                }}
+                radius={radius}
+                onRadiusChange={setRadius}
+                strength={strength}
+                onStrengthChange={setStrength}
+                onReset={api.resetSurface}
+                silent={focusMode}
+                testIdPrefix="sandbox-tool"
+                testId="sandbox-toolbar"
               />
-            </div>
-            <div className="field mt-3">
-              <label className="field-label" htmlFor="sandbox-reflection-2">
-                想记下的一句话（可留空）
-              </label>
-              <textarea
-                id="sandbox-reflection-2"
-                className="textarea"
-                style={{ minHeight: 80 }}
-                value={reflection}
-                maxLength={300}
-                onChange={(e) => setReflection(e.target.value)}
+            ) : null}
+
+            {/* 检查器 */}
+            {selected && !focusMode ? (
+              <Inspector
+                item={selected}
+                readOnly={api.locked}
+                onChange={handleItemChange}
+                onRemove={() => {
+                  api.removeItem(selected.id);
+                  setSelectedId(null);
+                }}
+                onDuplicate={duplicateSelected}
+                onBringFront={bringToFront}
+                onSendBack={sendToBack}
+                onDone={() => setSelectedId(null)}
               />
-            </div>
-            <div className="btn-group mt-4" style={{ justifyContent: 'flex-end' }}>
-              <Button variant="quiet" onClick={() => setSaveOpen(false)}>
-                取消
-              </Button>
-              <Button onClick={confirmSave}>保存</Button>
-            </div>
+            ) : null}
           </div>
+
+          {/*
+            笔刷参数已并入 `SurfaceToolbar`（半径 + 力度两个滑杆就在工具条里），
+            这里只保留那句操作提示。滑块移进工具条的原因：原来滑块在托盘下方、
+            工具条在托盘上方，用户选完笔刷要往下看才能调大小，来回跳。
+          */}
+          {tool && !api.locked && !focusMode ? (
+            <p className="small muted wb-brushbar__hint">{t('sandbox.surfaceHint')}</p>
+          ) : null}
         </div>
+
+        {/* 右栏 */}
+        {!focusMode ? (
+          <div className="wb-col wb-col--side">
+            <Card className="wb-card">
+              <div className="wb-card__head">
+                <strong>这个沙盘让你想到什么</strong>
+              </div>
+              <p className="small muted">可以只选词，不写句子。</p>
+              <SandboxAffect labels={sandboxAffects} onChange={setSandboxAffects} />
+            </Card>
+
+            {saveOpen ? (
+              <SavePanel
+                reflection={api.reflection}
+                onReflectionChange={api.setReflection}
+                onSave={handleSave}
+                onCancel={() => setSaveOpen(false)}
+                saving={saving}
+              />
+            ) : (
+              <Card className="wb-card">
+                <div className="wb-card__head">
+                  <strong>{t('sandbox.reflectionLabel')}</strong>
+                </div>
+                {/* 用 label 包裹而不是同级 <strong>：否则读屏读出来是「编辑框，空白」 */}
+                <label className="field">
+                  <span className="sr-only">{t('sandbox.reflectionLabel')}</span>
+                  <textarea
+                    className="textarea"
+                    rows={3}
+                    maxLength={400}
+                    value={api.reflection}
+                    placeholder={t('sandbox.reflectionPlaceholder')}
+                    onChange={(event) => api.setReflection(event.target.value)}
+                  />
+                </label>
+              </Card>
+            )}
+
+            <Card className="wb-card">
+              <div className="wb-card__head">
+                <strong>过程与记录</strong>
+              </div>
+              <p className="small muted">
+                当前已记录 {api.events.length} 次操作。
+                {api.lastAction ? ` 最近一次：${api.lastAction}。` : ''}
+              </p>
+              <div className="btn-group mt-2" style={{ flexWrap: 'wrap' }}>
+                <Link className="btn btn--ghost btn--sm" to="/records">
+                  我的记录
+                </Link>
+                <Link className="btn btn--quiet btn--sm" to="/sandbox/compare">
+                  对比两次
+                </Link>
+                <Link className="btn btn--quiet btn--sm" to="/sandbox/clients">
+                  本地档案
+                </Link>
+              </div>
+            </Card>
+
+            <Notice tone="plain">
+              <p className="small">{t('sandbox.ethics')}</p>
+              <p className="small mt-1">{t('sandbox.localOnly')}</p>
+            </Notice>
+          </div>
+        ) : null}
+      </main>
+
+      {/* 专注模式提示（入口在页面顶部，见上方 `<SilenceToggle>`） */}
+      {focusMode ? (
+        <p className="wb-focushint" role="status">
+          专注模式 · 按 Esc 退出
+        </p>
       ) : null}
 
-      {/* ------------------------------- 注释弹层 ------------------------------- */}
-      {editNoteTarget ? (
-        <NoteEditor
-          initial={editNoteTarget.note ?? ''}
-          label={symbolLabel(editNoteTarget.symbolId)}
-          onCancel={() => setEditingId(null)}
-          onSave={(note) => {
-            setItems((prev) =>
-              prev.map((item) =>
-                item.id === editNoteTarget.id ? { ...item, note: note.trim() || undefined } : item,
-              ),
-            );
-            setEditingId(null);
-            show('注释已更新。', 'success');
-          }}
-        />
+      <span hidden data-testid="sandbox-dirty">{api.dirty ? "1" : "0"}</span>
+      <span hidden data-testid="sandbox-event-count">{api.events.length}</span>
+
+      <LockDialog
+        open={lockOpen}
+        itemCount={items.length}
+        onConfirm={handleLock}
+        onCancel={() => setLockOpen(false)}
+      />
+
+      {/* 读屏播报 */}
+      <p className="sr-only" aria-live="polite">
+        {api.lastAction ? `最近一次操作：${api.lastAction}` : ''}
+      </p>
+
+      {selected ? (
+        <p className="sr-only">
+          已选中 {symbolLabel(selected.symbolId)}。
+        </p>
       ) : null}
     </div>
   );
 }
 
-function NoteEditor({
-  initial,
-  label,
-  onSave,
-  onCancel,
-}: {
-  initial: string;
-  label: string;
-  onSave: (note: string) => void;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(initial);
-  return (
-    <div className="sandbox-modal" role="dialog" aria-modal="true" aria-label={`为「${label}」写注释`}>
-      <div className="sandbox-modal__panel">
-        <h2 className="card-title">为「{label}」写一句</h2>
-        <p className="card-desc mt-2">这句话只有你自己能看到。</p>
-        <div className="field mt-4">
-          <label className="field-label" htmlFor="sandbox-note">
-            注释
-          </label>
-          <input
-            id="sandbox-note"
-            className="input"
-            value={value}
-            maxLength={40}
-            autoFocus
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="例如：这是我妈"
-          />
-        </div>
-        <div className="btn-group mt-4" style={{ justifyContent: 'flex-end' }}>
-          <Button variant="quiet" onClick={onCancel}>
-            取消
-          </Button>
-          <Button onClick={() => onSave(value)}>确定</Button>
-        </div>
-      </div>
-    </div>
-  );
-}

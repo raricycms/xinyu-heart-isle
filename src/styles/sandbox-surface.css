@@ -1,0 +1,534 @@
+/**
+ * 心屿 · 沙面介质层样式（surface-dev 维护）
+ *
+ * 只服务三个组件：
+ *   src/sandbox/surface/SurfaceToolbar.tsx   -> .ss-toolbar / .ss-tool / .ss-range / .ss-reset
+ *   src/sandbox/surface/SilenceToggle.tsx    -> .ss-silence
+ *   src/sandbox/render/*.tsx 的笔刷宿主      -> .ss-drawable
+ *
+ * 约定：
+ * 1. 全部类名以 `ss-`（sand surface）开头，绝不碰几何工作台的 `.wb-*`
+ *    与渲染器的 `.iso2d` / `.dom2d` / `.three-renderer`，避免覆盖顺序战。
+ * 2. 只用 global.css 的设计令牌（--sand-* / --teal-* / --ink-* / --sp-* / --r-*），
+ *    不引入新色板；沙盘工作台的 `--c-*` 令牌属于另一套，这里不依赖它。
+ * 3. 触摸目标 ≥ 48×48（CONTRACT §7 要求 44×44，这里取更严的 iOS HIG 值）。
+ * 4. 断点 640px：工具条折行、滑杆独占一行、文字标签在超窄屏仍保留
+ *    （图标 + 中文短词是主要识别手段，只有英文长词才会溢出）。
+ */
+
+/* -------------------------------------------------------------------------- */
+/*                              笔刷宿主（触摸）                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 加在渲染器最外层可绘制元素上。
+ * `touch-action: none` 是让 pointermove 在触摸设备上真正连续的前提：
+ * 缺了它，浏览器会把第一次移动当成滚动手势，pointermove 只来一两次就 cancel。
+ * 代价是这块区域不能滚动页面 —— 沙盘本来就是全屏交互区，符合预期。
+ */
+.ss-drawable {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/** 绘制中禁掉右键菜单式长按选择（iOS Safari 会长按弹出菜单） */
+.ss-drawable--drawing {
+  cursor: crosshair;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  工具条                                     */
+/* -------------------------------------------------------------------------- */
+
+.ss-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(8px);
+}
+
+.ss-toolbar--disabled {
+  opacity: 0.6;
+}
+
+.ss-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.ss-toolbar__group--tools {
+  flex-wrap: wrap;
+}
+
+.ss-toolbar__group--ranges {
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.ss-toolbar__group--reset {
+  gap: var(--sp-1);
+}
+
+/** 把「重新铺沙」推到右侧（容器够宽时） */
+.ss-toolbar__grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ss-toolbar__sep {
+  flex: none;
+  width: 1px;
+  height: 24px;
+  margin: 0 var(--sp-1);
+  background: var(--border);
+}
+
+/* --------------------------------- 工具按钮 -------------------------------- */
+
+.ss-tool {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  /* 48×48 触摸目标 */
+  min-width: 48px;
+  min-height: 48px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--ink-700);
+  font-family: var(--font-body);
+  font-size: 11px;
+  line-height: 1.1;
+  cursor: pointer;
+  transition:
+    background 0.15s var(--ease),
+    border-color 0.15s var(--ease),
+    color 0.15s var(--ease),
+    transform 0.1s var(--ease);
+}
+
+.ss-tool:hover:not(:disabled) {
+  background: var(--sand-100);
+  border-color: var(--border);
+}
+
+.ss-tool:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.ss-tool:focus-visible {
+  outline: 2px solid var(--teal-400);
+  outline-offset: 1px;
+}
+
+.ss-tool.is-active {
+  background: var(--teal-50);
+  border-color: var(--teal-300);
+  color: var(--teal-700);
+  box-shadow: inset 0 0 0 1px var(--teal-200);
+}
+
+.ss-tool:disabled {
+  cursor: not-allowed;
+  color: var(--ink-300);
+}
+
+.ss-tool__glyph {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.ss-tool__label {
+  white-space: nowrap;
+}
+
+/* ---------------------------------- 滑杆 ---------------------------------- */
+
+.ss-range {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 112px;
+}
+
+.ss-range__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: 11px;
+  color: var(--ink-500);
+  white-space: nowrap;
+}
+
+.ss-range__value {
+  color: var(--teal-600);
+  font-size: 11px;
+}
+
+.ss-range__input {
+  /* 轨道加高到 20px，命中区再靠 padding 撑到 ~44px */
+  width: 100%;
+  height: 20px;
+  padding: 12px 0;
+  margin: 0;
+  background: transparent;
+  accent-color: var(--teal-500);
+  cursor: pointer;
+  /* 让 iOS 的触摸拖动不被页面滚动手势抢走 */
+  touch-action: none;
+}
+
+.ss-range__input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ss-range__input:focus-visible {
+  outline: 2px solid var(--teal-400);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* -------------------------------- 重新铺沙 -------------------------------- */
+
+.ss-reset {
+  min-height: 48px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--ink-500);
+  font-family: var(--font-body);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s var(--ease),
+    border-color 0.15s var(--ease),
+    color 0.15s var(--ease);
+}
+
+.ss-reset:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--sand-100);
+  color: var(--ink-700);
+}
+
+.ss-reset:focus-visible {
+  outline: 2px solid var(--teal-400);
+  outline-offset: 1px;
+}
+
+.ss-reset:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/** 二次确认态：视觉上明确"这是危险操作"（只用 global.css 里真实存在的 alert 令牌） */
+.ss-reset--confirm {
+  border-color: var(--alert-400);
+  background: var(--alert-50);
+  color: var(--alert-600);
+}
+
+.ss-reset--confirm:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--alert-50) 70%, var(--alert-400));
+  border-color: var(--alert-600);
+  color: var(--alert-600);
+}
+
+.ss-reset--cancel {
+  color: var(--ink-400);
+  border-color: transparent;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                静默模式开关                                 */
+/* -------------------------------------------------------------------------- */
+
+.ss-silence {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ss-silence__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 常驻的极简入口，仍然满足 44px 命中高度 */
+  min-height: 44px;
+  padding: 0 var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--ink-400);
+  font-family: var(--font-body);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background 0.2s var(--ease),
+    color 0.2s var(--ease),
+    border-color 0.2s var(--ease);
+}
+
+.ss-silence__btn:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--sand-100);
+  color: var(--ink-700);
+}
+
+.ss-silence__btn:focus-visible {
+  outline: 2px solid var(--teal-400);
+  outline-offset: 1px;
+}
+
+.ss-silence__btn.is-active {
+  border-color: var(--teal-300);
+  background: var(--teal-50);
+  color: var(--teal-700);
+}
+
+.ss-silence__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ss-silence__glyph {
+  font-size: 14px;
+  line-height: 1;
+}
+
+/**
+ * 静默态：隐藏一切工具与提示，只留托盘。
+ * 用 display:none 而不是 visibility:hidden —— 后者仍会被读屏读到，
+ * 用户在"专注模式"里还能听到工具栏，体验是错的。
+ *
+ * 注意：主要机制是 `SurfaceToolbar` 的 `silent` prop（直接不渲染），
+ * 这里的 `.ss-silent` 是**给宿主页面用的兜底**：页面把 class 加到舞台容器上，
+ * 就能一并隐藏页面自己那套 `.wb-surfacebar` / `.wb-inspector` 浮层。
+ * 两者可以同时存在，不会互相干扰。
+ */
+.ss-silent .ss-toolbar,
+.ss-silent .ss-range,
+.ss-silent .ss-hint,
+.ss-silent .wb-surfacebar,
+.ss-silent .wb-inspector {
+  display: none;
+}
+
+/* 静默态下开关本身要退化成一个小圆点，不抢注意力 */
+.ss-silent .ss-silence__label {
+  display: none;
+}
+
+.ss-silent .ss-silence__btn {
+  min-width: 44px;
+  justify-content: center;
+  opacity: 0.55;
+}
+
+.ss-silent .ss-silence__btn:hover,
+.ss-silent .ss-silence__btn:focus-visible,
+.ss-silent .ss-silence__btn.is-active {
+  opacity: 1;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        3D 降级视图（上下文丢失 / 不支持画）                  */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * 这几条规则服务 `src/sandbox/render/three.tsx` 的两个降级分支。
+ * 放在本文件而不是 `sandbox-workbench.css`，是因为它们属于**渲染器介质层**
+ * 的能力边界处理，跟几何工作台布局无关；同时避免两个维护者改同一个文件。
+ *
+ * 关键点：降级视图必须看起来"是刻意的"，而不是"页面坏了"。
+ */
+
+/* 3D 视图不支持拖动画沙时的提示条：信息级，不要做成红色告警 */
+.three-renderer__nofly {
+  border: 1px solid var(--watch-400);
+  background: var(--watch-50);
+  color: var(--watch-600);
+  border-radius: var(--r-sm);
+  padding: var(--sp-1) var(--sp-3);
+}
+
+/* 上下文丢失时的静态替身：白底、居中、可读，绝不留下空白画布 */
+.three-renderer__fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  overflow-y: auto;
+  text-align: center;
+  background: var(--sand-50);
+}
+
+.three-renderer__fallback-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--ink-700);
+}
+
+/* 摆件清单：丢失上下文时仍然把"沙盘里有什么"还给用户 */
+.three-renderer__fallback-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-1) var(--sp-3);
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  list-style: none;
+  max-width: 420px;
+}
+
+.three-renderer__fallback-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+/* 上下文丢失时画布本身已经不可用，隐藏掉免得露出最后一片残影 */
+.three-renderer--lost canvas {
+  display: none;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  响应式                                     */
+/* -------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .ss-toolbar {
+    gap: 4px;
+    padding: 6px 8px;
+    border-radius: var(--r-md);
+  }
+
+  .ss-toolbar__sep {
+    display: none;
+  }
+
+  /* 7 个工具在窄屏仍然横排一行，靠横向滚动兜底（宁可滚也不要缩到 32px） */
+  .ss-toolbar__group--tools {
+    flex-wrap: nowrap;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .ss-toolbar__group--tools::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ss-tool {
+    flex: none;
+    min-width: 52px;
+    min-height: 52px;
+    padding: 4px;
+  }
+
+  .ss-tool__glyph {
+    font-size: 20px;
+  }
+
+  /* 滑杆各占半行，数值跟着标签走 */
+  .ss-toolbar__group--ranges {
+    width: 100%;
+    gap: var(--sp-2);
+  }
+
+  .ss-range {
+    flex: 1 1 40%;
+    min-width: 128px;
+  }
+
+  .ss-range__input {
+    padding: 14px 0;
+  }
+
+  .ss-toolbar__group--reset {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .ss-toolbar__grow {
+    display: none;
+  }
+
+  .ss-reset {
+    min-height: 48px;
+    flex: 1 1 auto;
+  }
+
+  .ss-silence__btn {
+    min-height: 48px;
+  }
+}
+
+/* 窄屏 + 横屏（手机横过来）时，工具条不要吃掉沙盘高度 */
+@media (max-width: 900px) and (max-height: 520px) {
+  .ss-toolbar {
+    position: absolute;
+    left: var(--sp-2);
+    right: var(--sp-2);
+    bottom: var(--sp-2);
+    z-index: 4;
+    max-height: 46%;
+    overflow-y: auto;
+  }
+}
+
+/* 减少动效：去掉按压缩放与所有过渡 */
+@media (prefers-reduced-motion: reduce) {
+  .ss-tool,
+  .ss-reset,
+  .ss-silence__btn,
+  .ss-range__input {
+    transition: none;
+  }
+
+  .ss-tool:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* 高对比模式（outlineMode）：加深边框，避免在浅沙上糊成一片 */
+@media (prefers-contrast: more) {
+  .ss-toolbar {
+    border-color: var(--border-strong);
+  }
+
+  .ss-tool,
+  .ss-reset {
+    border-color: var(--border-strong);
+  }
+
+  .ss-tool.is-active {
+    border-color: var(--teal-600);
+  }
+}

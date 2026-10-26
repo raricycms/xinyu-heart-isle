@@ -15,7 +15,8 @@ import { useToast } from '@/lib/toast';
 import { cx } from '@/lib/utils';
 import { getScaleById } from '@/scales/data';
 import { getToolById } from '@/toolbox/tools';
-import type { JournalEntry, MoodEntry, SandboxSnapshot, ScaleResult, ToolSession } from '@/lib/types';
+import type { JournalEntry, MoodEntry, ScaleResult, ToolSession } from '@/lib/types';
+import { useSessions } from '@/lib/sessionStore';
 import '@/styles/home.css';
 
 const MOOD_FACES: { value: MoodEntry['mood']; glyph: string; label: string }[] = [
@@ -47,7 +48,7 @@ type TimelineItem =
 export default function HomePage() {
   const moods = useCollection<MoodEntry>(STORAGE_KEYS.moods);
   const scaleResults = useCollection<ScaleResult>(STORAGE_KEYS.scaleResults);
-  const sandboxes = useCollection<SandboxSnapshot>(STORAGE_KEYS.sandbox);
+  const sandboxes = useSessions();
   const toolSessions = useCollection<ToolSession>(STORAGE_KEYS.toolSessions);
   const journals = useCollection<JournalEntry>(STORAGE_KEYS.journal);
   const preferences = usePreferences();
@@ -105,9 +106,9 @@ export default function HomePage() {
       items.push({
         kind: 'sandbox',
         at: s.at,
-        title: `沙盘 · ${s.title}`,
+        title: `沙盘 · ${s.title || '未命名'}`,
         desc: `${s.items.length} 个摆件`,
-        to: '/sandbox',
+        to: `/sandbox/session/${s.id}`,
       });
     });
     toolSessions.slice(0, 2).forEach((t) => {

@@ -1,0 +1,5 @@
+{
+  "updatedAt": "2026-10-26T17:04:37.559Z",
+  "note": "无障碍审计基线（棘轮）：只允许收窄。更新方式：node --experimental-strip-types scripts/audit/a11y.ts --update-baseline",
+  "entries": []
+}

@@ -1,0 +1,392 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xinyu.local/schema/sandplay-session-v1.schema.json",
+  "title": "心屿沙盘会话文件（sandplay-session/v1）",
+  "description": "「心屿 / Xinyu」沙盘会话导出格式。规范正文见 docs/FORMAT.md；本 schema 只描述结构，不表达任何临床含义。校验器的实际判定以 scripts/validate-session.ts 为准（见 FORMAT.md §9「Schema 与内置校验器的差异」）。",
+  "type": "object",
+  "required": ["format", "version", "exportedAt", "producer", "session"],
+  "additionalProperties": true,
+  "properties": {
+    "format": {
+      "const": "sandplay-session/v1",
+      "description": "格式标识。文件名后缀约定为 .sandplay.json。"
+    },
+    "version": {
+      "const": 1,
+      "description": "文件结构版本。只有 v1。"
+    },
+    "exportedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "导出时刻（ISO 8601，UTC）。"
+    },
+    "producer": {
+      "type": "object",
+      "description": "生成该文件的程序信息，用于排查兼容问题。",
+      "required": ["app", "version"],
+      "properties": {
+        "app": { "type": "string", "minLength": 1, "description": "程序名，例如「心屿 Xinyu」。" },
+        "version": { "type": "string", "minLength": 1, "description": "程序版本，例如「2.0.0」。" },
+        "homepage": { "type": "string", "description": "程序主页（可选）。" }
+      }
+    },
+    "session": { "$ref": "#/$defs/session" }
+  },
+
+  "$defs": {
+    "session": {
+      "type": "object",
+      "description": "会话正文。自包含快照：items 是最终画面，events 是过程。",
+      "required": [
+        "id",
+        "createdAt",
+        "title",
+        "mode",
+        "sceneId",
+        "locked",
+        "items",
+        "events"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "会话 id（本地生成，非身份标识）。" },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "会话开始时间（ISO 8601）。"
+        },
+        "endedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "会话结束时间（可选）。"
+        },
+        "title": { "type": "string", "description": "会话标题。允许空字符串。" },
+        "mode": {
+          "enum": ["self", "counselor", "supervision"],
+          "description": "self=自助，counselor=咨询师协作，supervision=督导。"
+        },
+        "sceneId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "场景主题 id。内置 5 个：beach / meadow / night / room / void，允许自定义。"
+        },
+        "locked": { "type": "boolean", "description": "是否封盘（锁定后不可修改）。" },
+        "lockedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "封盘时间（可选）。"
+        },
+        "archived": { "type": "boolean", "description": "是否归档（可选）。" },
+        "items": {
+          "type": "array",
+          "description": "摆件最终状态（= 事件重放结果）。",
+          "items": { "$ref": "#/$defs/item" }
+        },
+        "events": {
+          "type": "array",
+          "description": "过程事件流，可为空数组。",
+          "items": { "$ref": "#/$defs/event" }
+        },
+        "surface": { "$ref": "#/$defs/surface" },
+        "reflection": { "type": "string", "description": "用户自述（可选）。" },
+        "prompts": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "引导问题（可选）。"
+        },
+        "meta": { "$ref": "#/$defs/meta" },
+        "annotations": {
+          "type": "array",
+          "description": "时间轴标注（可选）。",
+          "items": { "$ref": "#/$defs/annotation" }
+        },
+        "thumbnail": {
+          "type": "string",
+          "description": "缩略图 dataURL（可选，不回传任何服务器）。"
+        },
+        "stats": {
+          "type": "object",
+          "description": "客观统计摘要（仅供阅读，不参与校验）。",
+          "additionalProperties": { "type": ["number", "string"] }
+        }
+      }
+    },
+
+    "item": {
+      "type": "object",
+      "description": "一个摆件。严格：出现未定义字段即视为不兼容。",
+      "required": ["id", "symbolId", "x", "y", "scale", "rotation", "z"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "会话内唯一。" },
+        "symbolId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "沙具 id，例如 mountain / tree / person-child-1。未知 id 由渲染端回退显示。"
+        },
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "归一化横坐标，0=左边缘，1=右边缘。"
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "归一化纵坐标，0=上边缘，1=下边缘（原点左上，y 向下）。"
+        },
+        "scale": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 4,
+          "description": "缩放倍数。当前 UI 范围 0.2~4；v1 迁移来的历史数据可能低至 0.1，故下限取 0.1 以与内置校验器一致。"
+        },
+        "rotation": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180,
+          "description": "旋转角度（度），顺时针为正。"
+        },
+        "z": {
+          "type": "number",
+          "description": "层序（越大越靠上）。整数或小数均可，不做范围限制。"
+        },
+        "note": { "type": "string", "description": "用户给这个摆件写的注释（可选）。" },
+        "affectLabels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "用户自选的感受词（可选，不做任何分析）。"
+        },
+        "burial": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "埋入深度 0~1（0=完全露出，1=完全埋没）。"
+        },
+        "audioNote": {
+          "type": "string",
+          "description": "本地录音 dataURL。仅在导出选项 includeAttachments=true 时出现。"
+        },
+        "imageData": {
+          "type": "string",
+          "description": "本地自定义图 dataURL。仅在导出选项 includeAttachments=true 时出现。"
+        }
+      }
+    },
+
+    "event": {
+      "type": "object",
+      "description": "一条过程事件。严格：外层字段固定；payload 内部允许扩展（向前兼容）。",
+      "required": ["t", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "type": "number",
+          "minimum": 0,
+          "description": "相对会话开始的毫秒数，应单调不减。"
+        },
+        "type": {
+          "enum": [
+            "item.add",
+            "item.move",
+            "item.scale",
+            "item.rotate",
+            "item.remove",
+            "item.note",
+            "item.affect",
+            "item.layer",
+            "item.bury",
+            "scene.change",
+            "surface.stroke",
+            "surface.reset",
+            "session.start",
+            "session.phase",
+            "session.lock",
+            "session.save",
+            "session.import",
+            "annotation.add",
+            "reflection.edit"
+          ]
+        },
+        "itemId": {
+          "type": "string",
+          "description": "涉及单个摆件时的目标 id；scene/session 级事件没有此字段。"
+        },
+        "payload": {
+          "type": "object",
+          "description": "载荷。各类型的形状见 allOf 中的 if/then 分支；未知额外键被允许（向前兼容）。",
+          "additionalProperties": true
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "item.add" } } },
+          "then": { "required": ["payload"], "properties": { "payload": {
+            "type": "object", "required": ["item"],
+            "properties": { "item": { "$ref": "#/$defs/item" } } } } } },
+
+        { "if": { "properties": { "type": { "const": "item.move" } } },
+          "then": { "required": ["itemId", "payload"], "properties": {
+            "itemId": { "type": "string" },
+            "payload": { "type": "object", "required": ["x", "y"], "properties": {
+              "x": { "type": "number", "minimum": 0, "maximum": 1 },
+              "y": { "type": "number", "minimum": 0, "maximum": 1 } } } } } },
+
+        { "if": { "properties": { "type": { "const": "item.scale" } } },
+          "then": { "required": ["itemId", "payload"], "properties": {
+            "itemId": { "type": "string" },
+            "payload": { "type": "object", "required": ["scale"], "properties": {
+              "scale": { "type": "number", "minimum": 0.1, "maximum": 4 } } } } } },
+
+        { "if": { "properties": { "type": { "const": "item.rotate" } } },
+          "then": { "required": ["itemId", "payload"], "properties": {
+            "itemId": { "type": "string" },
+            "payload": { "type": "object", "required": ["rotation"], "properties": {
+              "rotation": { "type": "number" } } } } } },
+
+        { "if": { "properties": { "type": { "const": "item.remove" } } },
+          "then": { "required": ["itemId"], "properties": { "itemId": { "type": "string" } } } },
+
+        { "if": { "properties": { "type": { "const": "item.note" } } },
+          "then": { "required": ["itemId"], "properties": {
+            "itemId": { "type": "string" },
+            "payload": { "type": "object", "properties": { "note": { "type": "string" } } } } } },
+
+        { "if": { "properties": { "type": { "const": "item.affect" } } },
+          "then": { "required": ["itemId", "payload"], "properties": {
+            "itemId": { "type": "string" },
+            "payload": { "type": "object", "required": ["affectLabels"], "properties": {
+              "affectLabels": { "type": "array", "items": { "type": "string" } } } } } } },
+
+        { "if": { "properties": { "type": { "const": "item.layer" } } },
+          "then": { "required": ["itemId", "payload"], "properties": {
+            "itemId": { "type": "string" },
+            "payload": { "type": "object", "required": ["z"], "properties": {
+              "z": { "type": "number" } } } } } },
+
+        { "if": { "properties": { "type": { "const": "item.bury" } } },
+          "then": { "required": ["itemId", "payload"], "properties": {
+            "itemId": { "type": "string" },
+            "payload": { "type": "object", "required": ["burial"], "properties": {
+              "burial": { "type": "number", "minimum": 0, "maximum": 1 } } } } } },
+
+        { "if": { "properties": { "type": { "const": "scene.change" } } },
+          "then": { "required": ["payload"], "properties": { "payload": {
+            "type": "object", "required": ["sceneId"], "properties": {
+              "sceneId": { "type": "string", "minLength": 1 } } } } } },
+
+        { "if": { "properties": { "type": { "const": "surface.stroke" } } },
+          "then": { "required": ["payload"], "properties": { "payload": {
+            "type": "object", "required": ["after"], "properties": {
+              "tool": { "type": "string" },
+              "before": { "$ref": "#/$defs/surface" },
+              "after": { "$ref": "#/$defs/surface" } } } } } },
+
+        { "if": { "properties": { "type": { "const": "surface.reset" } } },
+          "then": {} },
+
+        { "if": { "properties": { "type": { "const": "session.start" } } },
+          "then": { "required": ["payload"], "properties": { "payload": {
+            "type": "object", "properties": {
+              "sceneId": { "type": "string" },
+              "mode": { "type": "string" } } } } } },
+
+        { "if": { "properties": { "type": { "const": "session.phase" } } },
+          "then": { "required": ["payload"], "properties": { "payload": {
+            "type": "object", "required": ["phase"], "properties": {
+              "phase": { "enum": ["intro", "create", "reflect", "connect", "record", "dismantle"] } } } } } },
+
+        { "if": { "properties": { "type": { "const": "session.lock" } } },
+          "then": {} },
+
+        { "if": { "properties": { "type": { "const": "session.save" } } },
+          "then": { "properties": { "payload": { "type": "object", "properties": {
+            "title": { "type": "string" } } } } } },
+
+        { "if": { "properties": { "type": { "const": "session.import" } } },
+          "then": { "properties": { "payload": { "type": "object", "properties": {
+            "from": { "type": "string" } } } } } },
+
+        { "if": { "properties": { "type": { "const": "annotation.add" } } },
+          "then": { "required": ["payload"], "properties": { "payload": {
+            "type": "object", "required": ["id", "eventIndex", "text"], "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "eventIndex": { "type": "number" },
+              "text": { "type": "string" } } } } } },
+
+        { "if": { "properties": { "type": { "const": "reflection.edit" } } },
+          "then": { "required": ["payload"], "properties": { "payload": {
+            "type": "object", "required": ["text"], "properties": {
+              "text": { "type": "string" } } } } } }
+      ]
+    },
+
+    "surface": {
+      "type": "object",
+      "description": "L2 沙面高度场。height / wetness 为 RLE+Base64（分别以 S1 / W1 开头），编码细节见 FORMAT.md §6。",
+      "required": ["cols", "rows", "height"],
+      "properties": {
+        "cols": { "type": "integer", "minimum": 1, "maximum": 512, "description": "列数，默认 128。" },
+        "rows": { "type": "integer", "minimum": 1, "maximum": 512, "description": "行数，默认 96。" },
+        "height": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+          "description": "高度场：Base64('S' '1' ver colsLE16 rowsLE16 runCountLE32 (value u8, len varint)*)。"
+        },
+        "wetness": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+          "description": "湿度场（可选）：Base64('W' '1' ver (value u8, len varint)*)，解码后长度 = cols*rows。"
+        },
+        "state": {
+          "enum": ["dry", "wet"],
+          "description": "全局湿度档（工具层快速判断）。"
+        },
+        "waterAdded": {
+          "type": "number",
+          "minimum": 0,
+          "description": "已喷水次数（客观计数，不解读）。"
+        }
+      }
+    },
+
+    "meta": {
+      "type": "object",
+      "description": "会话元信息（临床记录字段的非诊断子集）。注意：realName / phone / idCard / email / address / wechat / name 一律禁止。",
+      "properties": {
+        "alias": { "type": "string", "description": "化名/代号。" },
+        "clientRef": { "type": "string", "description": "本地档案 id（非真实身份）。" },
+        "therapistRef": { "type": "string", "description": "咨询师代号。" },
+        "sessionNo": { "type": "number", "description": "第几次会谈。" },
+        "phase": {
+          "enum": ["intro", "create", "reflect", "connect", "record", "dismantle"],
+          "description": "临床流程阶段。"
+        },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" },
+        "trayW": { "type": "number", "description": "沙盘宽（cm），客观记录。" },
+        "trayD": { "type": "number", "description": "沙盘深（cm），客观记录。" },
+        "trayH": { "type": "number", "description": "沙盘高（cm），客观记录。" },
+        "consentPhoto": { "type": "boolean", "description": "是否已取得拍摄同意。" },
+        "consentProcess": { "type": "boolean", "description": "是否同意导出过程数据（事件流）。" }
+      }
+    },
+
+    "annotation": {
+      "type": "object",
+      "description": "时间轴标注（治疗师或本人在某条事件上打点）。",
+      "required": ["id", "eventIndex", "t", "text", "at"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "eventIndex": {
+          "type": "number",
+          "description": "对应事件序号（0-based）；-1 表示会话结尾。"
+        },
+        "t": { "type": "number", "minimum": 0, "description": "相对会话开始的毫秒数。" },
+        "text": { "type": "string" },
+        "author": { "enum": ["self", "counselor"], "description": "标注作者。" },
+        "at": { "type": "string", "format": "date-time", "description": "标注写入时刻。" }
+      }
+    }
+  }
+}
