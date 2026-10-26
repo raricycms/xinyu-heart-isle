@@ -8,10 +8,10 @@
  *
  * 用法：node scripts/dev/browse.mjs <path> [--wait=1200] [--shot=out.png] [--html]
  */
-import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import puppeteer from 'puppeteer-core';
+import { launchPreview } from './_shared/preview.mjs';
 
 const CHROME_CANDIDATES = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -25,7 +25,9 @@ const path = args.find((arg) => !arg.startsWith('--')) ?? '/';
 const waitMs = Number((args.find((arg) => arg.startsWith('--wait=')) ?? '--wait=1200').split('=')[1]);
 const shot = (args.find((arg) => arg.startsWith('--shot=')) ?? '').split('=')[1];
 const dumpHtml = args.includes('--html');
-const port = Number((args.find((arg) => arg.startsWith('--port=')) ?? '--port=4173').split('=')[1]);
+const preferredPort = Number(
+  (args.find((arg) => arg.startsWith('--port=')) ?? '--port=4173').split('=')[1],
+);
 
 const chrome = CHROME_CANDIDATES.find((candidate) => existsSync(candidate));
 if (!chrome) {
@@ -33,40 +35,24 @@ if (!chrome) {
   process.exit(2);
 }
 
-const base = `http://127.0.0.1:${port}`;
-
-function startPreview() {
-  const child = spawn(
-    process.platform === 'win32' ? 'npx.cmd' : 'npx',
-    ['vite', 'preview', '--port', String(port), '--strictPort'],
-    { cwd: process.cwd(), shell: process.platform === 'win32', stdio: 'ignore' },
-  );
-  return child;
-}
-
-async function waitForServer(url, timeoutMs = 20000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url, { method: 'GET' });
-      if (response.ok) return true;
-    } catch {
-      /* 还没起来 */
-    }
-    await new Promise((resolve) => setTimeout(resolve, 300));
-  }
-  return false;
-}
-
-const preview = startPreview();
+/*
+ * 起 preview 的活全部交给 `_shared/preview.mjs`。
+ *
+ * 这里原来是自己 `spawn('npx.cmd', [...], { shell: true })` + 收尾
+ * `preview.kill()` —— 那是本仓库最贵的一个坑：`shell: true` 会套一层
+ * cmd.exe，`kill()` 只杀掉 cmd.exe，**真正的 vite 进程变孤儿继续占着 4173**。
+ * 实测修前每次跑完都残留 1 个，端口一直在 Listen。
+ *
+ * 现在改用公共模块：直接 spawn `node vite.js`（单进程、kill 即真 kill），
+ * 并且 `stopPreview` 会等到进程真的退出才返回，连跑两次也不会互相踩。
+ */
+const preview = await launchPreview({ port: preferredPort, distDir: 'dist' });
+const base = preview.base;
+console.log(`使用端口 ${preview.port}（首选 ${preferredPort}）`);
 let browser;
 let failed = false;
 
 try {
-  if (!(await waitForServer(`${base}/`))) {
-    throw new Error(`vite preview 未能在 20s 内启动（${base}）`);
-  }
-
   browser = await puppeteer.launch({
     executablePath: chrome,
     headless: true,
@@ -133,7 +119,8 @@ try {
   console.error('探针失败：', error);
 } finally {
   if (browser) await browser.close();
-  preview.kill();
+  /* 关键：等到 vite 真的断气才返回，否则连跑两次会撞端口/互相踩 */
+  await preview.close();
 }
 
 process.exit(failed ? 1 : 0);

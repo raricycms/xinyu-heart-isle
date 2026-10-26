@@ -157,6 +157,21 @@
   min-height: 44px;
 }
 
+/*
+ * 保留期下拉框同样受 CONTRACT §7 的 44px 约束。
+ *
+ * 它此前只有 41px 高：`.select` 的 padding 9px + 9px、边框 1px + 1px、
+ * 行高 1.6 × 14px = 22.4px，合计 41.4px。差 3px 看着微不足道，
+ * 但这正是「历史遗留问题」的典型形态 —— 页面上唯一的表单控件
+ * 比旁边两个按钮矮一截，触摸时更容易点空。
+ *
+ * 用 min-height 而不是加 padding：加 padding 会把文字基线一起顶下去，
+ * 与同一行的「永久保留」标签错位；min-height 只影响盒子高度。
+ */
+.archive-retention .select {
+  min-height: 44px;
+}
+
 .archive-confirm {
   margin-top: var(--sp-2);
   padding: var(--sp-3);

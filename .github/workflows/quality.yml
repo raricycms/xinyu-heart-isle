@@ -73,6 +73,14 @@ jobs:
       - name: 无障碍审计
         run: node --experimental-strip-types --no-warnings scripts/audit/a11y.ts
 
+      # a11y 规则本身也要被验证。三条判据（keyboard-unreachable /
+      # reduced-motion / 路由覆盖）都曾**恒真**——从没红过的规则
+      # 等于没有规则。这一步注入 6 种缺陷，要求每条都被捕获，
+      # 其中一条是反向验证（合法 roving tabindex 组不得误报）。
+      # 它把 dist 复制到 tmp/mut-dist/ 再注入，全程不碰 dist/。
+      - name: 无障碍规则自检（注入缺陷必须被抓到）
+        run: node scripts/audit/meta-self-test.mjs
+
       - name: 性能预算
         run: node --experimental-strip-types --no-warnings scripts/audit/perf.ts
 

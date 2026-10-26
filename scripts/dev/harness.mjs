@@ -2,18 +2,21 @@
  * 浏览器核查脚本的公共底座。
  *
  * 存在的理由（踩过的坑）：
- * 1. `spawn('npx.cmd', ...)` 在 Windows 上会在 `npx` 与 `vite` 之间多一层进程，
- *    直接 `child.kill()` 只杀掉 npx，vite preview 会变成孤儿进程占住端口，
+ * 1. 起预览服务器必须**不产生孤儿进程**。以前这里是
+ *    `spawn('npx.cmd', ...)` + `shell: true`，Windows 上会多一层 cmd.exe，
+ *    `child.kill()` 只杀掉 cmd.exe，vite preview 变孤儿占住端口，
  *    下一次跑脚本就 `ERR_CONNECTION_REFUSED` 或连到旧构建。
- *    这里在退出前用 `taskkill /T /F` 杀整棵进程树。
+ *    当时的补救是在退出前 `taskkill /T /F` 杀整棵进程树 —— 那是**打补丁**，
+ *    根治办法是直接 spawn `node vite.js`（单进程，kill 即真 kill）。
+ *    现在统一委托给 `_shared/preview.mjs`，与 scripts/dev 下其他脚本同一套实现。
  * 2. 等待服务器就绪要显式失败，不能静默 fallthrough——
  *    否则报错信息会变成「页面打不开」，掩盖真正原因。
  * 3. 端口在用时要能自动让路，而不是让脚本互相踩。
  */
-import { spawn, execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import puppeteer from 'puppeteer-core';
+import { pickFreePort, launchPreview, sleep } from './_shared/preview.mjs';
 
 const CHROME_CANDIDATES = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -40,7 +43,7 @@ export function isPortFree(port) {
   });
 }
 
-/** 从 startPort 起找一个空闲端口 */
+/** 从 startPort 起找一个空闲端口（保留导出，兼容旧调用方） */
 export async function pickPort(startPort = 4200, tries = 40) {
   for (let i = 0; i < tries; i += 1) {
     const port = startPort + i;
@@ -49,77 +52,31 @@ export async function pickPort(startPort = 4200, tries = 40) {
   throw new Error(`从 ${startPort} 起连续 ${tries} 个端口都被占用`);
 }
 
-export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** 杀掉整棵进程树（Windows 必须用 /T，否则 vite 会残留） */
-function killTree(child) {
-  if (!child || child.killed) return;
-  try {
-    if (process.platform === 'win32') {
-      execSync(`taskkill /PID ${child.pid} /T /F`, { stdio: 'ignore' });
-    } else {
-      process.kill(-child.pid, 'SIGKILL');
-    }
-  } catch {
-    /* 已经死了 */
-  }
-  try {
-    child.kill('SIGKILL');
-  } catch {
-    /* ignore */
-  }
-}
+/*
+ * `sleep` 从 `_shared/preview.mjs` 再导出：
+ * 二十多个脚本都在 `import { sleep } from './harness.mjs'`，
+ * 保持这个出口不破，免得为了统一实现而改一堆无关文件。
+ */
+export { sleep };
 
 /**
  * 启动 vite preview 并等待就绪。
  * 返回 { base, close }。
+ *
+ * ⚠️ 这里原来是 `spawn('npx.cmd', ..., { shell: true })` + 收尾 `taskkill /T /F`。
+ * `taskkill /T` 确实能把 vite 一起杀掉，所以**这个文件本身不泄漏**（实测 0 残留），
+ * 但它是「靠杀进程树来掩盖多进程」的补丁思路：
+ *   - 一旦 `close()` 没跑到（异常退出、Ctrl+C），照样留孤儿；
+ *   - 每个用 `harness.mjs` 的脚本都在依赖这个脆弱约定。
+ * 现在改成委托 `_shared/preview.mjs`：直接 spawn `node vite.js`
+ * （单进程，pid 就是 vite 本体），kill 即真 kill，不再需要 /T。
  */
 export async function startPreview({ port, distDir = 'dist', timeoutMs = 40000 } = {}) {
-  if (!existsSync(distDir)) {
-    throw new Error(`找不到 ${distDir}/，请先跑 \`npx vite build\``);
-  }
-  const chosen = port ?? (await pickPort());
-  const base = `http://127.0.0.1:${chosen}`;
-
-  const child = spawn(
-    process.platform === 'win32' ? 'npx.cmd' : 'npx',
-    ['vite', 'preview', '--port', String(chosen), '--strictPort'],
-    {
-      cwd: process.cwd(),
-      shell: process.platform === 'win32',
-      stdio: 'ignore',
-      detached: process.platform !== 'win32',
-    },
-  );
-
-  const deadline = Date.now() + timeoutMs;
-  let ready = false;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${base}/`, { signal: AbortSignal.timeout(2000) });
-      if (response.ok) {
-        ready = true;
-        break;
-      }
-    } catch {
-      /* 还没起来 */
-    }
-    await sleep(250);
-  }
-
-  if (!ready) {
-    killTree(child);
-    throw new Error(`vite preview 未能在 ${timeoutMs}ms 内就绪（${base}）`);
-  }
-
-  return {
-    base,
-    close: async () => {
-      killTree(child);
-      // 给 OS 一点时间释放端口
-      await sleep(250);
-    },
-  };
+  return launchPreview({
+    port: port ?? (await pickFreePort()),
+    distDir,
+    timeoutMs,
+  });
 }
 
 /** 启动浏览器；调用方负责 close */

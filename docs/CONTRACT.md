@@ -261,7 +261,7 @@ import { coerceSession, migrateSnapshot } from '@/format/migrate';
 | `replayAll` 4000 事件 | ≤ 60ms | 单元测试（实测 1.3ms） |
 | `computeSessionStats` 4000 事件 | ≤ 30ms | 单元测试（实测 1.3ms） |
 | 触摸目标 | ≥ 44×44px | `scripts/audit/a11y.ts` |
-| 键盘可达 | 沙盘全部操作可用键盘 | **手工核查**（`scripts/e2e/smoke.ts` 只覆盖量表作答的 1–4 快捷键，沙盘键盘路径无自动化覆盖） |
+| 键盘可达 | 沙盘全部操作可用键盘 | **部分自动化**：`a11y.ts` 的 `keyboard-unreachable` 覆盖 15 条路由（检查交互元素是否在 Tab 序内，有变异证据）；**但「操作逻辑本身可用键盘完成」仍需手工核查** —— `smoke.ts` 只覆盖量表作答的 1–4 快捷键，沙盘的完整键盘流程（方向键移动、Enter 摆放）无自动化覆盖 |
 | 对比度 | 正文 ≥ 4.5:1 | `scripts/audit/a11y.ts` |
 
 

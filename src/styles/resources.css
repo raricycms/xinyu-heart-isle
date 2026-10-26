@@ -616,10 +616,20 @@
   color: var(--ink-500);
 }
 
-/* 外链本体：带一个「↗」提示是新窗口打开 */
+/*
+ * 外链本体：带一个「↗」提示是新窗口打开。
+ *
+ * 这个链接**不适用**行内文字链的 44px 豁免（WCAG 2.5.5 豁免的是
+ * 「嵌在句子里的链接」）。它是卡片底部的独立操作入口，用户是奔着点它去的。
+ * 原来盒高只有 23.9px —— 一半都不到，手机上很容易点进空白处。
+ *
+ * min-height 撑高盒子而不是加 padding：padding 会把「↗」和文字一起
+ * 垂直居中到偏移位置，与左侧同排的 Tag 不对齐；min-height 只加高盒子。
+ */
 .res-link {
   display: inline-flex;
   align-items: center;
+  min-height: 44px;
   gap: 5px;
   font-size: 13.5px;
   font-weight: 500;

@@ -150,19 +150,75 @@ node --experimental-strip-types --no-warnings scripts/audit/a11y.ts --update-bas
 | 深链接刷新 | 5 | `/sandbox/compare` 刷新后仍渲染、无 4xx 静态资源 |
 | 全路由扫描 | 36 | 12 条路由，**每条都验证不是 404 兜底页** |
 
-### a11y：5 个路由，**全部清零**
+### a11y：15 个路由，**全部清零**
+
+覆盖从 5 条扩到 **15 条**（对齐 `src/App.tsx` 的真实路由表）。此前只测 5 条，
+所有动态路由（`:scaleId` / `:toolId` / `:id` / `:id/report`）**零覆盖** ——
+补齐后立刻暴露出 4 个此前从未被量过的真实缺陷。
 
 | 规则 | 数量 | 说明 |
 |---|---|---|
-| `target-size` | **0** | 曾 163/152 项，按高度聚类后统一 padding 修掉 |
+| `target-size` | **0** | 曾 163/152 项；补齐路由后又发现 4 处（详见下表） |
 | `color-contrast` | **0** | 曾 122 项；`--ink-400` 由 `#8b9497`(2.79:1) 改 `#515556`(5.5:1) |
 | `form-label` | **0** | 两处缺 label 已补（`SandboxPage` textarea、`RecordsPage` file input） |
+| `keyboard-unreachable` | **0** | 判据曾形同虚设，见下方「三条判据的变异证据」 |
+| `heading-order` | **0** | 曾 1 项：两个呼吸工具 h1→h3 跳级 |
+
+**补齐路由覆盖后暴露并修复的 4 个真实缺陷**（都在 `src/styles/**`）：
+
+| 路由 | 缺陷 | 修法 |
+|---|---|---|
+| `/scales/phq-9` | 返回链接 62×**30.9px** | `.scale-run__back` 加 `min-height: 44px` + `margin-left: -8px` 抵消 padding |
+| `/sandbox/clients` | 保留期 `<select>` 307×**41px** | `.archive-retention .select { min-height: 44px }` |
+| `/toolbox/breathing-478` | 返回链接 78.7×**21.3px** | `.tool-back` 改 inline-flex + min-height |
+| `/resources` | 外链 97×**23.9px** | `.res-link` 加 `min-height: 44px` |
+
+以及 `/toolbox/breathing-478` 的标题跳级：`Breathing478.tsx` / `BoxBreathing.tsx`
+的 `<h3>` 改 `<h2>`（它们直接跟在 `ToolShell` 的 `<h1>` 后面，用 h3 就是跳级），
+`toolbox.css` 用 `.tool-explain h2, .tool-explain h3` 共享同一套视觉规格。
 
 **基线已收窄到 `entries: []`（0 条），现在 `--strict` 也通过。**
 这意味着门禁从「棘轮模式」升级为「零容忍模式」—— 任何新增 a11y 问题都会直接失败。
 
-`prefers-reduced-motion` **已完全正常**，5 个路由在 reduce 模式下动效元素全部降为 0
-（`53→0`、`34→0`、**`68`→0**、`28→0`、`60→0`）。
+`prefers-reduced-motion` **已完全正常**，15 个路由在 reduce 模式下动效元素全部降为 0
+（`53→0`、`34→0`、**`68`→0**、`28→0`、`60→0`、`95→0`、`19→0` …）。
+
+#### 三条判据的变异证据（没有变异证据的规则等于没有规则）
+
+三条判据都曾**恒真**——它们从来没红过，所以从来没有人知道它们在检查什么。
+修完后每条都用「注入缺陷 → 必须红 → 还原 → 必须绿」验证过：
+
+| 判据 | 变异 | 改前 | 改后 |
+|---|---|---|---|
+| `keyboard-unreachable` | `Button.tsx` 的 `<button>` 加 `tabIndex={-1}`（全站按钮 Tab 不到） | **EXIT 0 假绿** | EXIT 1，8 个 critical 并指名元素 |
+| `reduced-motion` | `global.css` 的 reduce 媒体查询只让 `.btn` 响应 | **EXIT 0**（60→43 算"已响应"） | EXIT 1（43 > allowed 12） |
+| 路由覆盖 5→15 | 撤掉 `.res-link` 的 `min-height` | 5 条路由下 **EXIT 0**（看不到） | 15 条路由下 EXIT 1（`97×23.9px`） |
+
+这三条现在由 `scripts/audit/meta-self-test.mjs` 自动回归（6 条变异，
+含一条**反向**验证：合法的 roving tabindex 组不得被误报）：
+
+```bash
+node scripts/audit/meta-self-test.mjs
+```
+
+它把 `dist` 复制到 `tmp/mut-dist/` 再注入，**全程不碰工作区的 `dist/`**。
+这一点是踩坑换来的：最初直接改 `dist/index.html` 再恢复，恢复操作与并发的
+`vite build` 撞车，读到过期 bundle，假报了 7 个根本不存在的
+`keyboard-unreachable`。**变异测试必须跑在副本上，否则它会污染被测对象本身。**
+
+#### roving tabindex：豁免必须做窄，否则规则又会变回橡皮图章
+
+沙具库 327 个格子用的是标准 roving tabindex（整组一个 Tab 停点，组内方向键移动），
+把每个 `tabindex="-1"` 都判违规会误报 327 个。但豁免写松了同样致命：
+
+- ✗ **第一版**：向上找 6 层祖先，只要有 ≥2 个交互兄弟就豁免
+  → 规则**再次恒真**，因为页面导航栏永远能凑出"组"。实测变异 M1 仍然 EXIT 0。
+- ✓ **最终版**：向上最多 2 层找**直接兄弟**，且组内每个同类兄弟都**显式声明过
+  `tabindex`**（= 由 JS 统一管理），才认定为合法 roving 组。
+
+**已知边界**（写在代码注释里，不假装修好）：`role="application"` 内靠方向键/
+程序化聚焦的可达性静态审不出来；roving 组内「只有一项坏、其余正常」的局部损坏
+会漏掉（组内有一个 `tabindex >= 0` 即整组豁免）。这两条保留 `CONTRACT.md` §7 的手工核查。
 
 **审计结果必须可复现**，否则基线毫无意义。这一点踩过坑，见 §8 第 7 条。
 
@@ -173,7 +229,7 @@ node --experimental-strip-types --no-warnings scripts/audit/a11y.ts --update-bas
 ### 4.1 加单元测试
 
 文件放被测模块旁边：`src/scales/scoring.test.ts`、`src/lib/storage.test.ts`。
-`vitest.config.ts` 的 `include` 是 `src/**/*.test.ts(x)` + `scripts/**/*.test.ts`。
+`vitest.config.ts` 的 `include` 是 `src/**/*.test.ts(x)`。
 
 **必须显式 import**，`globals` 没开：
 
@@ -646,6 +702,168 @@ grep `scoreScale|scoring|反向|危机` 一个都不命中。真测试在 `src/s
 
 > **规避**：写「由 X 验证」时，去 X 里搜一眼那个判据。记错门禁名比不写更糟 ——
 > 有人想确认「体积真被守住了」时会去看 X，然后什么也找不到，最后还是选择相信文档。
+
+#### 4.7.3 幽灵的第八类：门禁的**观测者**在干扰被观测者
+
+这一类不是断言写错，也不是被测对象缺失，而是**门禁之间的隐式共享状态**。
+
+`scripts/dev/check-routes.mjs` 曾被判定为「有 flake」：连跑 4 次，第 1 次绿、
+第 2–4 次稳定红，且失败路由每次都不同：
+
+```
+run 1: exit=0  结果：全部通过
+run 2: exit=1  结果：21 项失败
+FAIL  /toolbox  net::ERR_CONNECTION_REFUSED at http://127.0.0.1:56308/toolbox
+[preview 退出 code=4294967295]
+```
+
+排查过：页面顺序、端口冲突、内存、chrome 残留、`reload`、孤儿进程、`stdio: 'pipe'`
+（这个确实是真问题，见下）……全部排除后仍然复现。
+
+真正的原因：**并行工作的另一个角色（负责修 `scripts/dev/` 进程泄漏的队友）写了一个
+「清理孤儿进程」的函数，在每个脚本跑前跑后都调用它**：
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+  Where-Object { $_.CommandLine -match 'vite\.js.*preview' } |
+  Where-Object { $_.ProcessId -ne $PID } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+它按**命令行正则**匹配，不区分 PID 归属。于是我的 preview 在跑到一半时被它杀掉，
+症状就是 `ERR_CONNECTION_REFUSED` + `code=4294967295`（被强杀的典型退出码）。
+它停手后立刻复跑，**4/4 全绿**——`check-routes.mjs` 从来没坏过。
+
+更值得记的是**次生污染**：那个队友的度量脚本用同一个模式扫进程来统计「残留数」，
+于是把我正在跑的 preview 也算成了「它自己脚本泄漏的孤儿」——
+**度量工具本身在制造它要度量的现象，同时冤枉自己的修复**。
+
+> **规避**（三条，都写进团队纪律）：
+> 1. **禁止按进程名 / 命令行模式杀进程。** 只杀自己 `spawn` 拿到的那个 `child.pid`：
+>    `child.kill()` → 轮询 `child.exitCode` 等它真断气 → 兜底 `taskkill /PID <自己 pid> /T /F`。
+> 2. **判断「有没有残留」要限定到自己的端口**（`Get-NetTCPConnection -LocalPort <port>`），
+>    不要用全机扫描。全机扫描在并行环境下必然把别人的进程算进来。
+> 3. **首选端口被占时换端口，不要杀占用者**（`pickFreePort(preferred)`）。
+>    并行开发里「谁先占到就是谁的」是唯一不会互相破坏的规则。
+>
+> 还有一条元教训：**「这个门禁有 flake」这个判断本身也可能是假的。**
+> 在归因到被测代码之前，先问：有没有别的东西在同一时刻动同一份资源？
+> 我差点为此去改一个本来正确的脚本。
+
+#### 4.7.4 幽灵的第九类：**修门禁的过程中，门禁在偷偷变绿**
+
+这一轮 a11y 审计里出现了四次「同一个 bug 反复复活」，每次都是不同的原因，
+但都属于同一类：**门禁的判据在「看起来合理」的方向上漂移，直到它再次恒真。**
+
+**① 固定 sleep 读到异步渲染的中间态**
+
+`reduced-motion` 的子检查用 `page.reload()` + 固定 `sleep(500)` 采样。
+但路由是按需加载的 chunk，500ms 时 CSS 可能还没应用，于是量到初始态：
+
+```
+/sandbox           正常模式 3 个动效元素 → reduce 后 3 个   ← 假警告
+```
+
+用「采样到稳定为止」的方法（每 250ms 读一次，连续 3 次相同才采用，
+8s 上限）重测，真实值是 **68 → 0**（完全正常）。
+`/about` 更典型：单独跑稳定 `19 → 0`，整轮跑稳定假报 `3 → 3`。
+
+> 教训：**任何「等一下再量」的断言，测的是等待时长，不是被测对象。**
+> 需要的是「等到它稳定」，而稳定本身要被定义（连续 N 次读数相同）。
+
+**② 稳定性签名漏掉了样式表**
+
+`waitForStableDom` 原本只比对 DOM 节点数 / 文本长度。于是：
+
+```
+/sandbox/clients 保留期 <select> 量到 307×41px   ← 假阳性
+```
+
+41px 是**懒加载的 CSS chunk 还没应用**时的高度，真实值 190×44。
+把 `document.styleSheets.length` 和累计 `cssRules.length` 加进签名后消失。
+
+> 教训：**「DOM 稳定」不等于「页面稳定」。** 影响尺寸的是样式，不是节点。
+
+**③ roving tabindex 的豁免写得太松，规则变回橡皮图章**
+
+沙具库 327 个格子用 roving tabindex（`tabIndex={i === focus ? 0 : -1}`），
+把每个 `tabindex="-1"` 都判违规会误报 327 个。第一版豁免「向上找 6 层祖先，
+有 ≥2 个交互兄弟就放过」——结果**规则再次恒真**，因为页面导航栏永远能凑出"组"。
+注入「全站按钮 `tabIndex={-1}`」的变异后，仍然 **EXIT 0**。
+
+收窄到「向上最多 2 层找**直接兄弟**，且组内每个兄弟都**显式声明过 tabindex**」
+之后，同一变异立刻 EXIT 1 并指名 8 个元素。
+
+> 教训：**豁免逻辑是门禁最脆弱的地方。** 每写一个 `continue`，都要问：
+> 这个豁免能不能被最普通的一张页面触发？能，它就是新的恒真。
+
+**④ `process.exit()` 绕过 `finally`，而门禁报告「通过」**
+
+`a11y.ts` 的 `waitForServer()` 在超时分支里 `process.exit(2)`。这会**立即终止进程**，
+`finally` 里的 `stopPreview(preview)` 根本不执行 → preview 泄漏占着 4174 →
+**下一次运行**在 `assertPortFree` 处报「端口已被占用」EXIT 2。
+
+危险之处：**第一轮是绿的**。泄漏只在第二轮显现，而第二轮的错误信息指向环境，
+看起来像「机器上有脏进程」，不像「门禁自己没收拾干净」。连续两轮才暴露：
+
+```
+run 1: exit=0  ...  4174 残留 1   ← 报通过，但留下了垃圾
+run 2: exit=2  端口 4174 已被占用  ← 看起来像环境问题
+```
+
+修法：模块级 `livePreviews: Set` + `process.on('exit')`（Node 保证 `process.exit()`
+会触发它，`finally` 不会），在钩子里用**同步** `spawnSync taskkill /T /F`
+（exit 钩子里事件循环已停，异步子进程根本不会跑起来）。
+
+> 教训：**`process.exit()` 是 `finally` 的盲区。** 任何会 `process.exit` 的模块，
+> 清理逻辑都必须挂在 `exit` 事件上，而不是只写在 `finally` 里。
+> 更一般的：**「单次跑通」不能证明清理正确，要连跑两次。**
+
+#### 变异测试必须跑在副本上，否则它会污染被测对象
+
+这一条独立成段，因为它造成了一次**长达半小时的假故障排查**。
+
+为了验证 a11y 规则会不会真红，我写了脚本直接改 `dist/index.html`（注入 `<script>`），
+跑完再恢复。某次恢复操作与并发的一条 `vite build` 撞上，`index.html` 被写成了
+**旧 bundle hash**（`index-ona4T-I6.js`），而 `assets/` 里已经是 `index-CC-iJE1F.js`。
+紧接着的两次审计因此加载了过期资源，报出 **7 个根本不存在的 `keyboard-unreachable`**：
+
+```
+[/scales/phq-9] keyboard-unreachable: <button ... tabindex="-1" class="btn btn--lg">开始作答</button>
+[/sandbox]      keyboard-unreachable: <button ... tabindex="-1">新建沙盘</button>
+… 7 条
+```
+
+源码里**没有任何一处** `tabIndex={-1}`（grep 全 src 只有 2 处，都是 roving 的正常用法）。
+用独立探针在同样的路由上量，**0 个** —— 这时才想到去比对 bundle 文件名。
+
+> **规则**：变异测试必须在**被测目录的副本**上做。
+> `scripts/audit/meta-self-test.mjs` 把 `dist` 复制到 `tmp/mut-dist/`，
+> 通过 `XINYU_A11Y_DIST` 环境变量让审计指向副本（`vite preview --outDir`），
+> **工作区的 `dist/` 全程只读**。
+>
+> 同样的错误在团队里还出现过一次：用 `git checkout` 把受版本控制的文件切回旧版做
+> A/B 对比。这会让**磁盘状态与正在执行的代码不一致**，别人同时构建就拿到混合态。
+> 正确做法是复制到 `tmp/ab-work/` 再改副本。
+
+> **可观测的守卫**：副本方案之外，还要能**发现**读到的是过期产物。
+> `meta-self-test.mjs` 的 `assertAssetsExist()` 会解析 `index.html` 引用的
+> `/assets/*.js|css`，逐个确认文件存在；缺失就 EXIT 2 并直接说明
+> 「index.html 与 assets/ 来自不同构建」。
+>
+> 这条守卫验证过会红：手工把 `dist/index.html` 的 bundle 名改成不存在的
+> `index-DOESNOTEXIST.js`，自检立刻停在起点：
+>
+> ```
+> ✗ 产物不自洽：dist/index.html 引用了不存在的资源：
+>     index-DOESNOTEXIST.js
+>   这说明 index.html 与 assets/ 来自不同的构建（多半是构建期间被并发改写）。
+>   在这种产物上跑出的任何「规则命中」都不可信，直接重跑 npx vite build。
+> exit: 2
+> ```
+>
+> 这正是当初那 7 个假 `keyboard-unreachable` 的根因。有了这条断言，
+> 同类故障从「半小时的源码排查」变成「一秒钟的产物检查」。
 
 ---
 

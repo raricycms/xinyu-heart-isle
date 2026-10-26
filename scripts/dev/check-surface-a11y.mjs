@@ -18,9 +18,9 @@
  *
  * 用法：node scripts/dev/check-surface-a11y.mjs [--port=4193]
  */
-import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
+import { launchPreview } from './_shared/preview.mjs';
 
 const CHROME = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -36,17 +36,25 @@ const arg = (name, fallback) => {
   const found = args.find((a) => a.startsWith(`--${name}=`));
   return found ? found.split('=')[1] : fallback;
 };
-const port = Number(arg('port', '4193'));
+const preferredPort = Number(arg('port', '4193'));
 const shotDir = arg('shot-dir', 'tmp');
 mkdirSync(shotDir, { recursive: true });
-const base = `http://127.0.0.1:${port}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const preview = spawn(
-  process.platform === 'win32' ? 'npx.cmd' : 'npx',
-  ['vite', 'preview', '--port', String(port), '--strictPort'],
-  { cwd: process.cwd(), shell: process.platform === 'win32', stdio: 'ignore' },
-);
+/*
+ * 起 preview 统一走 `_shared/preview.mjs`。
+ *
+ * 这里原来是 `spawn('npx.cmd', [...], { shell: true })` + 收尾 `preview.kill()`：
+ * `shell: true` 在 Windows 上套了一层 cmd.exe，kill 只杀 cmd.exe，
+ * **vite 变孤儿继续占着 4193**。实测修前每次跑完残留 1 个、端口仍在 Listen，
+ * 导致第二次运行 --strictPort 起不来。
+ *
+ * 现在：直接 spawn `node vite.js`（单进程，kill 即真 kill），
+ * 且 `stopPreview` 会等到进程真的退出。
+ */
+const preview = await launchPreview({ port: preferredPort, distDir: 'dist' });
+const base = preview.base;
+console.log(`使用端口 ${preview.port}（首选 ${preferredPort}）`);
 
 let browser;
 let failed = 0;
@@ -56,14 +64,6 @@ const check = (name, ok, detail) => {
 };
 
 try {
-  for (let i = 0; i < 60; i += 1) {
-    try {
-      if ((await fetch(`${base}/`)).ok) break;
-    } catch {
-      /* retry */
-    }
-    await sleep(300);
-  }
   browser = await puppeteer.launch({
     executablePath: CHROME,
     headless: true,
@@ -253,5 +253,6 @@ try {
   process.exitCode = 1;
 } finally {
   if (browser) await browser.close();
-  preview.kill();
+  /* 关键：等到 vite 真的断气才返回，否则连跑两次会撞端口 */
+  await preview.close();
 }

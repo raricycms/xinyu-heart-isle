@@ -83,6 +83,37 @@ docs/VISION.md
 
 如果你认为其中某个文件必须改，请先开 issue，**不要直接提 PR**。
 
+### 并行工作：不要按进程名杀进程
+
+多个 agent / 多人可能同时在同一个工作区跑门禁，而门禁都要起 `vite preview`。
+**一个真实的教训**：有人为了清理自己的孤儿进程写了
+
+```powershell
+# ✗ 绝对不要这么写
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+  Where-Object { $_.CommandLine -match 'vite\.js.*preview' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+它按命令行**正则匹配**，不区分 PID 归属，会把别人正在跑的 preview 一起杀掉。
+受害者的门禁表现成「随机某个路由 `ERR_CONNECTION_REFUSED` + `preview 退出 code=4294967295`」，
+看起来像被测代码有 flake，实际是外部干扰——排查方向会被彻底带偏。
+更糟的是：如果度量脚本也用同样的模式统计「残留进程数」，
+它会**把别人的进程算成自己的泄漏**，同时制造它要度量的现象。
+
+三条纪律：
+
+1. **只杀自己 `spawn` 出来的 `child.pid`**：
+   `child.kill()` → 轮询 `child.exitCode` 等它真断气 → 兜底 `taskkill /PID <自己 pid> /T /F`。
+   不要用 `/IM node.exe`，不要按模式匹配。
+2. **判断「有无残留」限定到自己的端口**：
+   `Get-NetTCPConnection -LocalPort <port> -State Listen`。
+   不要用全机扫描，那在并行环境下必然把别人的进程算进来。
+3. **首选端口被占就换端口，不要杀占用者**（`pickFreePort(preferred)`）。
+   「谁先占到就是谁的」是并行开发里唯一不会互相破坏的规则。
+
+写好后请统一用 `scripts/dev/_shared/preview.mjs`，不要每个脚本各写一套。
+
 ### 新增依赖的门槛
 
 心屿刻意保持依赖精简。新增一个依赖需要：

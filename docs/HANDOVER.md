@@ -16,7 +16,7 @@
 | 生产构建 | ✅ 通过 | `npx vite build` |
 | 主包体积 | ✅ gzip **140.7 kB**（预算 175 kB） | 看上一条输出的 `index-*.js` |
 | 单元测试 | ✅ 17 文件 / 546 用例全绿 | `npx vitest run` |
-| E2E 冒烟 | ✅ 10 场景 / 108 断言 | `node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts` |
+| E2E 冒烟 | ✅ 10 场景 / **120 断言** | `node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts` |
 | 无障碍审计 | ✅ critical 0 / warning 0 / exit 0 | `npx vite build && node --experimental-strip-types --no-warnings scripts/audit/a11y.ts` |
 | 首屏可交互 | ✅ 常态 408–456ms（预算 1500ms，失败线 3000ms） | `npm run perf`（需先 `npm run build`） |
 | 格式校验器 | ✅ 通过 | `node --experimental-strip-types --no-warnings scripts/validate-session.ts samples/example.sandplay.json` |
@@ -142,12 +142,19 @@
 对比度未用工具实测。
 
 **现状**：
-- `scripts/audit/a11y.ts` 用真实 Chrome 审计 5 条路由，
-  **critical 0 项、warning 0 项、exit 0**。曾经的历史存量
+- `scripts/audit/a11y.ts` 用真实 Chrome 审计 **15 条路由**（对齐 `src/App.tsx` 的
+  完整路由表），**critical 0 项、warning 0 项、exit 0**。曾经的历史存量
   （对比度 122、触摸目标 152、form-label 2）全部清零，基线已收窄为
   `entries: []`（`scripts/audit/a11y-baseline.json`）。
-- `prefers-reduced-motion` **系统级检测已验证真实生效**：5 条路由的动效元素
-  分别 53/34/**68**/28/60 → 全部降为 0（实测 3 次，sandbox 是 68 不是 58）。
+- 覆盖从 5 条扩到 15 条后，**立刻暴露出 4 个此前从未被量过的真实缺陷**
+  （`/scales/phq-9` 返回链接 30.9px、`/sandbox/clients` 下拉框 41px、
+  `/toolbox` 返回链接 21.3px、`/resources` 外链 23.9px），均已修复；
+  另有 1 处标题跳级（两个呼吸工具 h1→h3）已修。这说明「只测 5 条」时
+  这些缺陷一直存在，只是没人量过。
+- `prefers-reduced-motion` **系统级检测已验证真实生效**：15 条路由的动效元素
+  分别 53/34/**68**/28/60/95/19 … → 全部降为 0（实测 3 次，sandbox 是 68 不是 58）。
+- 三条判据（`keyboard-unreachable` / `reduced-motion` / 路由覆盖）都曾**恒真**，
+  现在每条都有变异证据，并由 `node scripts/audit/meta-self-test.mjs` 自动回归。
 - `scripts/dev/` 下有对比度计算器（`contrast.mjs`）与色板反解脚本
   （`palette.mjs` / `palette-tier.mjs`），改色板后可复算。
 

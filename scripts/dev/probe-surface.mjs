@@ -12,9 +12,9 @@
  *
  * 用法：node scripts/dev/probe-surface.mjs [--port=4192]
  */
-import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
+import { launchPreview } from './_shared/preview.mjs';
 
 const CHROME = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -27,11 +27,12 @@ if (!CHROME) {
 }
 
 const args = process.argv.slice(2);
-const port = Number((args.find((a) => a.startsWith('--port=')) ?? '--port=4192').split('=')[1]);
+const preferredPort = Number(
+  (args.find((a) => a.startsWith('--port=')) ?? '--port=4192').split('=')[1],
+);
 const shotDir = (args.find((a) => a.startsWith('--shot-dir=')) ?? '--shot-dir=scripts/dev/shots').split('=')[1];
 mkdirSync(shotDir, { recursive: true });
 
-const base = `http://127.0.0.1:${port}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -39,23 +40,22 @@ const check = (name, ok, detail = '') => {
   console.log(`  ${ok ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`);
 };
 
-const preview = spawn(
-  process.platform === 'win32' ? 'npx.cmd' : 'npx',
-  ['vite', 'preview', '--port', String(port), '--strictPort'],
-  { cwd: process.cwd(), shell: process.platform === 'win32', stdio: 'ignore' },
-);
+/*
+ * 起 preview 统一走 `_shared/preview.mjs`。
+ *
+ * 这里原来是 `spawn('npx.cmd', [...], { shell: true })` + 收尾 `preview.kill()`：
+ * Windows 上 `shell: true` 会套一层 cmd.exe，kill 只杀 cmd.exe，
+ * **vite 变孤儿继续占着 4192**。实测修前每次跑完残留 1 个、端口仍在 Listen。
+ *
+ * 现在：直接 spawn `node vite.js`（单进程，kill 即真 kill），
+ * 且 `stopPreview` 会等到进程真的退出再返回。
+ */
+const preview = await launchPreview({ port: preferredPort, distDir: 'dist' });
+const base = preview.base;
+console.log(`使用端口 ${preview.port}（首选 ${preferredPort}）`);
 
 let browser;
 try {
-  for (let i = 0; i < 60; i += 1) {
-    try {
-      if ((await fetch(`${base}/`)).ok) break;
-    } catch {
-      /* retry */
-    }
-    await sleep(300);
-  }
-
   browser = await puppeteer.launch({
     executablePath: CHROME,
     headless: true,
@@ -439,5 +439,6 @@ try {
   process.exitCode = 1;
 } finally {
   if (browser) await browser.close();
-  preview.kill();
+  /* 关键：等到 vite 真的断气才返回，否则连跑两次会撞端口 */
+  await preview.close();
 }

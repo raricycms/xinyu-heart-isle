@@ -203,8 +203,25 @@
   margin-bottom: var(--sp-4);
 }
 
+/*
+ * 返回链接：文字轻，但**点击区不能轻**。
+ *
+ * 原来只有 font-size，盒高 = 行高 ≈ 21.3px —— 远低于 CONTRACT §7 的 44px。
+ * 这是典型的「视觉上是个不起眼的返回链接，实际上很难点中」，
+ * 在手机上是实打实的可用性问题（尤其它就在屏幕左上角，单手拇指最难点到）。
+ *
+ * 用 inline-flex + min-height 撑高盒子，视觉上仍是轻量文字链接：
+ * 不加 padding-top/bottom 就不会把文字和下方标题推得太开。
+ * 负 margin 抵消新增的横向 padding，让文字左边缘仍与内容对齐
+ * （与 `.scale-run__back` 的处理保持一致）。
+ */
 .tool-back {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
+  margin-left: -8px;
   font-size: 12.5px;
   color: var(--ink-400);
   text-decoration: none;
@@ -252,6 +269,16 @@
   background: var(--sand-50);
 }
 
+/*
+ * `.tool-explain` 里的分节标题。
+ *
+ * 选择器同时匹配 h2 与 h3：这两个呼吸类工具（4-7-8 / 方块呼吸）的
+ * 说明区块直接跟在页面 h1 后面，用 h3 会跳级（h1 -> h3），所以改成了 h2；
+ * 而 body-scan / grounding / thought-record 等工具正文里先有 h2 分节，
+ * 说明区块仍用 h3 是对的。两种层级都要保持同样的视觉规格，
+ * 否则同一个组件在不同工具里长得不一样。
+ */
+.tool-explain h2,
 .tool-explain h3 {
   margin: 0 0 var(--sp-2);
   font-family: var(--font-display);

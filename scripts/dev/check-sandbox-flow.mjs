@@ -7,10 +7,10 @@
  *
  * 用法：node scripts/dev/check-sandbox-flow.mjs [--shot-dir=dir]
  */
-import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import puppeteer from 'puppeteer-core';
+import { launchPreview } from './_shared/preview.mjs';
 
 const CHROME_CANDIDATES = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -19,8 +19,9 @@ const CHROME_CANDIDATES = [
 ];
 const args = process.argv.slice(2);
 const shotDir = (args.find((arg) => arg.startsWith('--shot-dir=')) ?? '').split('=')[1] || '';
-const port = Number((args.find((arg) => arg.startsWith('--port=')) ?? '--port=4175').split('=')[1]);
-const base = `http://127.0.0.1:${port}`;
+const preferredPort = Number(
+  (args.find((arg) => arg.startsWith('--port=')) ?? '--port=4175').split('=')[1],
+);
 
 const chrome = CHROME_CANDIDATES.find((candidate) => existsSync(candidate));
 if (!chrome) {
@@ -28,11 +29,20 @@ if (!chrome) {
   process.exit(2);
 }
 
-const preview = spawn(
-  process.platform === 'win32' ? 'npx.cmd' : 'npx',
-  ['vite', 'preview', '--port', String(port), '--strictPort'],
-  { cwd: process.cwd(), shell: process.platform === 'win32', stdio: 'ignore' },
-);
+/*
+ * 起 preview 统一走 `_shared/preview.mjs`。
+ *
+ * 这里原来是 `spawn('npx.cmd', [...], { shell: true })` + 收尾 `preview.kill()`。
+ * Windows 上 `shell: true` 会套一层 cmd.exe，kill 只杀 cmd.exe，
+ * **vite 变孤儿继续占着 4175**。实测修前每次跑完残留 1 个、端口仍在 Listen，
+ * 第二次运行就起不来（--strictPort），或者连到上一次的旧构建上测。
+ *
+ * 现在：直接 spawn `node vite.js`（单进程，kill 即真 kill），
+ * 且 `stopPreview` 会等到进程真的退出再返回。
+ */
+const preview = await launchPreview({ port: preferredPort, distDir: 'dist' });
+const base = preview.base;
+console.log(`使用端口 ${preview.port}（首选 ${preferredPort}）`);
 
 let browser;
 const fails = [];
@@ -42,23 +52,9 @@ function check(name, ok, detail = '') {
   if (!ok) fails.push(`${name}${detail ? `: ${detail}` : ''}`);
 }
 
-async function waitForServer(url, timeoutMs = 25000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(url)).ok) return true;
-    } catch {
-      /* retry */
-    }
-    await new Promise((resolve) => setTimeout(resolve, 300));
-  }
-  return false;
-}
-
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 try {
-  if (!(await waitForServer(`${base}/`))) throw new Error('preview 启动超时');
   if (shotDir) mkdirSync(shotDir, { recursive: true });
 
   browser = await puppeteer.launch({
@@ -396,7 +392,8 @@ try {
   steps.push(` FAIL  脚本异常 — ${error}`);
 } finally {
   if (browser) await browser.close();
-  preview.kill();
+  /* 关键：等到 vite 真的断气才返回，否则连跑两次会撞端口 */
+  await preview.close();
 }
 
 console.log('\n=== 沙盘交互流程 ===');

@@ -225,11 +225,24 @@
   margin-bottom: var(--sp-4);
 }
 
+/*
+ * 返回链接的触摸目标。
+ *
+ * 原来是 `padding: 4px 2px` + `font-size: 13.5px` → 实测 62×30.9px，
+ * 低于 CONTRACT §7 的 44×44px。这个缺陷一直存在，只是 `/scales/:scaleId`
+ * 这条路由此前**不在 a11y 审计的覆盖列表里**（原来只测 5 条路由），
+ * 所以从来没人量过它。补齐路由覆盖后立刻暴露。
+ *
+ * 用法：`min-height` 撑到 44px，水平方向补一点 padding 让点击区域配得上视觉。
+ * 视觉上仍然是一个轻量的文字返回链接（靠 inline-flex + 居中，不改变字号）。
+ */
 .scale-run__back {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 2px;
+  min-height: 44px;
+  padding: 4px 8px;
+  margin-left: -8px; /* 抵消左侧 padding，视觉上仍与内容左对齐 */
   border: 0;
   background: none;
   color: var(--ink-500);

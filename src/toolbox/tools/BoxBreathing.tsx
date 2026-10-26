@@ -116,7 +116,8 @@ export function BoxBreathing() {
       </div>
 
       <div className="tool-explain">
-        <h3>什么时候用方块呼吸</h3>
+        {/* h2：页面第一个分节标题，跟在 ToolShell 的 h1 后。用 h3 会跳过 h2。 */}
+        <h2>什么时候用方块呼吸</h2>
         <p>
           四段等长，节奏方正，比 4-7-8 更容易记，也更容易在别人面前"看起来只是在发呆"。
           在会议室、地铁上、考试前都可以做。

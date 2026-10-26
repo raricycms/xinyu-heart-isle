@@ -29,7 +29,7 @@
  * 退出码：0 = 无 critical，1 = 有 critical（或 --strict 下有 warning）。
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import path from 'node:path';
@@ -62,6 +62,22 @@ const filter = argv.find((arg) => !arg.startsWith('--'));
 const PORT = Number((argv.find((arg) => arg.startsWith('--port=')) ?? '--port=4174').split('=')[1]);
 const BASE = `http://127.0.0.1:${PORT}`;
 const BASELINE_PATH = path.resolve(process.cwd(), 'scripts/audit/a11y-baseline.json');
+
+/**
+ * 审计哪个构建产物。
+ *
+ * 默认 `dist`。设 `XINYU_A11Y_DIST` 可指向别的目录 —— 专供**变异测试**：
+ * `scripts/audit/meta-self-test.mjs` 把 dist 复制到 `tmp/mut-dist/`，
+ * 在副本里注入缺陷，完全不碰工作区的 `dist`。
+ *
+ * 为什么必须能换目录：最初直接改 `dist/index.html` 再恢复，恢复操作和
+ * 另一条命令的 `vite build` 撞上，`index.html` 被写成旧 bundle hash；
+ * 紧接着两次审计读到**过期 bundle**，报出 7 个根本不存在的
+ * `keyboard-unreachable`。变异测试污染了被测对象本身。
+ */
+const DIST_DIR = process.env.XINYU_A11Y_DIST
+  ? path.resolve(process.env.XINYU_A11Y_DIST)
+  : path.resolve(process.cwd(), 'dist');
 
 /** CONTRACT §7：触摸目标 ≥ 44×44px */
 const MIN_TARGET = 44;
@@ -97,7 +113,36 @@ const MIN_CONTRAST_LARGE = 3;
 
 const chromePath = CHROME_CANDIDATES.find((candidate) => existsSync(candidate));
 
-const ROUTES = ['/', '/scales', '/sandbox', '/records', '/safety'];
+/**
+ * 审计覆盖的路由。
+ *
+ * **必须与 `src/App.tsx` 的 `<Route path=...>` 保持同步。**
+ *
+ * 原来只有 5 条（`/`、`/scales`、`/sandbox`、`/records`、`/safety`），
+ * 而 App.tsx 有 15 条 —— 也就是**大部分页面从来没被无障碍审计过**。
+ * 对比度、触摸目标、可访问名称这些问题在未覆盖的页面里可以无限存在。
+ *
+ * 动态路由用不存在的 id 填：数据不存在时页面应渲染体面的「找不到」提示
+ * 而不是白屏，那个提示本身也要满足无障碍要求。
+ * `*` 兜底路由不列入（它渲染 404 页，由 E2E 的 routes-sweep 覆盖）。
+ */
+const ROUTES = [
+  '/',
+  '/scales',
+  '/scales/phq-9',
+  '/sandbox',
+  '/sandbox/compare',
+  '/sandbox/clients',
+  '/sandbox/clients/demo-nonexistent',
+  '/sandbox/session/demo-nonexistent',
+  '/sandbox/session/demo-nonexistent/report',
+  '/records',
+  '/safety',
+  '/toolbox',
+  '/toolbox/breathing-478',
+  '/resources',
+  '/about',
+];
 
 /* -------------------------------------------------------------------------- */
 /*                                结果模型                                     */
@@ -142,15 +187,7 @@ function report(route: string, level: Level, rule: string, message: string, sele
  * 同一个变异在端口空着时 → html-lang critical 5、EXIT 1。
  */
 async function assertPortFree(port: number): Promise<void> {
-  const listening = await new Promise<boolean>((resolve) => {
-    const probe = createServer();
-    probe.once('error', () => resolve(true));
-    probe.once('listening', () => {
-      probe.close(() => resolve(false));
-    });
-    probe.listen(port, '127.0.0.1');
-  });
-  if (!listening) return;
+  if (!(await isPortListening(port))) return;
   console.error(
     `✗ 端口 ${port} 已被占用，无法确认审计对象是自己的构建产物。\n` +
       '  多半是上次残留的 vite preview（或别的服务）。在别人的页面上跑出来的\n' +
@@ -159,6 +196,24 @@ async function assertPortFree(port: number): Promise<void> {
       '  退出码 2 = 环境不满足，不是无障碍失败。',
   );
   process.exit(2);
+}
+
+/**
+ * 端口上是否有人在监听。
+ *
+ * 用「尝试自己 bind，能不能成功」来判断，而不是 `net.connect` ——
+ * bind 失败=有人在监听，这个判据不依赖对方是否接受连接，
+ * 也不会因为对端 backlog 满而产生误判。`assertPortFree` 和收尾自检共用它。
+ */
+async function isPortListening(port: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const probe = createServer();
+    probe.once('error', () => resolve(true));
+    probe.once('listening', () => {
+      probe.close(() => resolve(false));
+    });
+    probe.listen(port, '127.0.0.1');
+  });
 }
 
 function startPreview(): ChildProcess {
@@ -177,11 +232,18 @@ function startPreview(): ChildProcess {
     console.error(`✗ 找不到 vite 入口：${viteBin}（先 npm install）`);
     process.exit(2);
   }
-  return spawn(
+  const child = spawn(
     process.execPath,
-    [viteBin, 'preview', '--port', String(PORT), '--strictPort'],
+    [viteBin, 'preview', '--port', String(PORT), '--strictPort', '--outDir', DIST_DIR],
     { cwd: process.cwd(), stdio: 'ignore', windowsHide: true },
   );
+  /*
+   * 登记到 livePreviews 并装上 exit 钩子：这样即使后面某个
+   * `process.exit()` 绕过了 `finally`，preview 也会被收掉。
+   */
+  livePreviews.add(child);
+  installExitHook();
+  return child;
 }
 
 async function waitForServer(url: string, timeoutMs = 25_000): Promise<boolean> {
@@ -226,12 +288,107 @@ async function waitForServer(url: string, timeoutMs = 25_000): Promise<boolean> 
   return false;
 }
 
-function stopPreview(child: ChildProcess): void {
-  if (child.killed || child.exitCode !== null) return;
+/**
+ * 所有由本进程 spawn 的 preview。用于**进程级兜底清理**。
+ *
+ * 为什么必须有这个 Set：`finally` 不是万能的。
+ * `waitForServer()` 内部发现「端口上不是我们的构建产物」时会 `process.exit(2)`，
+ * 而 **`process.exit()` 会立即终止进程，`finally` 块根本不会执行** ——
+ * 于是 preview 留在 4174 上，下一次审计 `assertPortFree` 就 `EXIT 2`
+ * 「端口已被占用」，而占用者其实是自己上次留下的。
+ *
+ * 这不是假想：实测连续跑两次审计，第二次必挂（`ERR_CONNECTION_REFUSED`
+ * 之后 `4174 已被占用`）。
+ *
+ * `process.on('exit')` 在 `process.exit()` 时**会**被触发（Node 的保证），
+ * 所以把清理挂在这里，才能覆盖所有退出路径 —— 不用去逐个审计每个
+ * `process.exit` 出口（本文件有 10 个，将来还会增加）。
+ */
+const livePreviews = new Set<ChildProcess>();
+
+let exitHookInstalled = false;
+function installExitHook(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on('exit', () => {
+    for (const child of livePreviews) {
+      try {
+        // exit 钩子里只能同步操作。taskkill 同步调用就是为了这个场合。
+        if (process.platform === 'win32') {
+          spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+        } else {
+          child.kill('SIGKILL');
+        }
+      } catch {
+        /* 已经死了 */
+      }
+    }
+    livePreviews.clear();
+  });
+  /*
+   * 信号路径同样不走 `finally`（默认处理下直接终止）。
+   * 这里不拦截信号，只是补上清理；随后用默认行为退出。
+   */
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    process.on(signal, () => {
+      for (const child of livePreviews) {
+        try {
+          if (process.platform === 'win32') {
+            spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+          } else {
+            child.kill('SIGKILL');
+          }
+        } catch {
+          /* 已经死了 */
+        }
+      }
+      livePreviews.clear();
+      process.exit(signal === 'SIGINT' ? 130 : 143);
+    });
+  }
+}
+
+/**
+ * 关掉自己起的 preview 并**等它真的断气**。
+ *
+ * 原来这里是 `spawn('taskkill', ...)` 然后立刻返回 —— taskkill 本身是异步
+ * 子进程，调用方紧接着 `process.exit()`，于是父进程先死、taskkill 可能还没执行完，
+ * vite 就变成孤儿继续占着 4174。
+ *
+ * 现在：轮询等退出码 → 超时才强杀 → 再确认。
+ * 另外从 `livePreviews` 里摘掉，避免 exit 钩子重复处理。
+ */
+async function stopPreview(child: ChildProcess): Promise<void> {
+  livePreviews.delete(child);
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  // 先礼后兵：SIGTERM 让它自己收尾
+  try {
+    child.kill();
+  } catch {
+    /* 已经死了 */
+  }
+
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  // 兜底：只按自己 spawn 的 pid 强杀（含子进程）
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
   } else {
-    child.kill('SIGTERM');
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      /* 已经死了 */
+    }
+  }
+  // 再等一小会儿，确保端口真的释放了
+  const hardDeadline = Date.now() + 3000;
+  while (Date.now() < hardDeadline && child.exitCode === null) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
 
@@ -268,6 +425,12 @@ interface RawAudit {
   /** 当前 matchMedia 是否处于 reduce（由 Node 侧 emulateMediaFeatures 控制） */
   prefersReducedMotion: boolean;
   tabbableCount: number;
+  /**
+   * 有交互语义但键盘用户 Tab 不到的元素的摘要。
+   * 判据见 `auditPage` 里的注释：`tabbableCount === 0` 几乎不可能成立，
+   * 所以真正有约束力的是这个列表非空。
+   */
+  unreachableInteractive: Array<{ html: string }>;
   positiveTabIndex: Array<{ html: string; tabIndex: number }>;
 }
 
@@ -279,8 +442,15 @@ interface RawAudit {
  * 160 与 175 两个不同数字 —— 因为沙具库有 327 个格子，是按需/分批渲染的，
  * 抽样时可能只渲染了一半。基线在这种抖动下毫无意义。
  *
- * 做法：反复取「元素总数 + 各测试选择器命中数」作为签名，
+ * 做法：反复取「元素总数 + 各测试选择器命中数 + 样式表加载情况」作为签名，
  * 连续 3 次采样相同才认为稳定（上限 6s）。
+ *
+ * ⚠️ **样式表也要等**（补于 v2.0 审计）：路由是 `lazy()` 加载的，
+ * 每个 chunk 自带 CSS，CSS 是**异步**应用的。只等 DOM 数量稳定会漏掉
+ * 「元素都在了、但样式还没生效」这个窗口。实测后果：
+ * `/sandbox/clients` 的保留期 `<select>` 在 CSS 生效前高 **41px**，
+ * 生效后是 **44px** —— 审计恰好落在窗口里就会报一个不存在的触摸目标缺陷。
+ * 所以签名里加入「已加载样式表数量 + 规则总数」，样式表不再增长才算稳定。
  */
 async function waitForStableDom(page: Page): Promise<void> {
   const signature = async (): Promise<string> =>
@@ -289,6 +459,20 @@ async function waitForStableDom(page: Page): Promise<void> {
         .map((element) => element.getAttribute('data-testid'))
         .sort()
         .join(',');
+      /*
+       * 统计已装载样式表的规模。跨域样式表读 cssRules 会抛 SecurityError，
+       * 所以逐张 try/catch，读不到的记 -1（仍能反映「数量变化」）。
+       */
+      let ruleCount = 0;
+      let sheetCount = 0;
+      for (const sheet of document.styleSheets) {
+        sheetCount += 1;
+        try {
+          ruleCount += sheet.cssRules.length;
+        } catch {
+          ruleCount += -1;
+        }
+      }
       return [
         document.querySelectorAll('*').length,
         document.querySelectorAll('button').length,
@@ -296,6 +480,8 @@ async function waitForStableDom(page: Page): Promise<void> {
         document.querySelectorAll('[data-testid]').length,
         document.body.scrollHeight,
         testIds.length,
+        sheetCount,
+        ruleCount,
       ].join('|');
     });
 
@@ -624,6 +810,106 @@ async function auditPage(page: Page): Promise<RawAudit> {
       ),
     ].filter(visible).length;
 
+    /*
+     * 交互元素里有多少**进不了 Tab 序**。
+     *
+     * 原来的判据只有 `tabbableCount === 0` —— 也就是「整页一个可聚焦元素都没有」。
+     * 这个条件几乎不可能成立（每个页面都有导航链接），所以它等于永远通过：
+     * 一个页面上 50 个工具按钮全是不可聚焦的 <div>，照样绿。
+     * CONTRACT §7 要求的「沙盘全部操作可用键盘」因此没有任何自动化约束力。
+     *
+     * 现在改成可证明的口径：把「有交互语义」的元素数出来，再找出其中
+     * 键盘用户 Tab 不到的。难点在于 **roving tabindex 是合法的**：
+     * 网格/列表/工具栏的推荐 ARIA 实践就是「整组只有一个元素
+     * tabindex=0，其余 tabindex=-1，组内用方向键移动」。若把每个
+     * tabindex=-1 都算违规，就会把最标准的无障碍实现报成缺陷
+     * （实测沙具库 327 个格子全部误报）。
+     *
+     * 所以判定按**组**进行，但「组」的认定必须**很窄**，否则规则又会失效：
+     *   - 组 = 同一父元素下的**直接兄弟**（最多向上找 2 层）
+     *   - 组必须「统一管理」：每个同类兄弟都**显式**带 tabindex 属性
+     *     （roving 的特征就是全组都由 JS 统一改写 tabindex）
+     *   - 组内至少有一个成员 tabindex >= 0，整组才算可达
+     *
+     * 为什么要求「统一管理」：只判「组里有人可聚焦」是不够的。
+     * 实测过那版（向上找 6 层、只要祖先里有 2 个交互元素就豁免）：
+     * 给任意一个按钮加 tabindex="-1" **全部仍判可达** —— 因为页面顶部
+     * 总有一堆导航链接凑成群。规则等于又变回永远通过。
+     * 加上「同组兄弟都显式声明 tabindex」这一条后，真实的按钮
+     * （兄弟是原生 `<button>`，没有 tabindex 属性）不会再被豁免。
+     */
+    const INTERACTIVE_SELECTOR = [
+      'button',
+      'a[href]',
+      'input:not([type="hidden"])',
+      'select',
+      'textarea',
+      'summary',
+      '[role="button"]',
+      '[role="link"]',
+      '[role="tab"]',
+      '[role="checkbox"]',
+      '[role="switch"]',
+      '[role="radio"]',
+      '[role="menuitem"]',
+      '[role="option"]',
+      '[contenteditable="true"]',
+    ].join(',');
+
+    const interactive = [...document.querySelectorAll(INTERACTIVE_SELECTOR)].filter(visible);
+
+    /**
+     * 该元素是否属于一个「合法的 roving 组」（整组只有一个 Tab 停点，
+     * 组内用方向键移动 —— 沙具库的 327 个格子就是这种）。
+     */
+    function isInLegitRovingGroup(element: Element): boolean {
+      let container: Element | null = element.parentElement;
+      for (let depth = 0; container !== null && depth < 2; depth += 1) {
+        const peers = [...container.children].filter(
+          (child) =>
+            child !== element &&
+            child.matches(INTERACTIVE_SELECTOR) &&
+            !child.hasAttribute('disabled') &&
+            visible(child),
+        );
+        if (peers.length > 0) {
+          // 组内每个同类兄弟都必须显式声明过 tabindex（= 由 JS 统一管理）
+          const allManaged = peers.every((peer) => peer.hasAttribute('tabindex'));
+          if (!allManaged) return false;
+          return peers.some((peer) => Number(peer.getAttribute('tabindex')) >= 0);
+        }
+        container = container.parentElement;
+      }
+      return false;
+    }
+
+    const unreachableInteractive: Array<{ html: string }> = [];
+    for (const element of interactive) {
+      if (element.hasAttribute('disabled')) continue;
+      const tabIndexAttr = element.getAttribute('tabindex');
+      const tag = element.tagName.toLowerCase();
+      const isNativelyFocusable =
+        tag === 'button' ||
+        tag === 'select' ||
+        tag === 'textarea' ||
+        tag === 'summary' ||
+        (tag === 'a' && element.hasAttribute('href')) ||
+        (tag === 'input' && element.getAttribute('type') !== 'hidden');
+
+      let unreachable = false;
+      if (tabIndexAttr !== null && Number(tabIndexAttr) < 0) {
+        // 显式移出 Tab 序
+        unreachable = true;
+      } else if (!isNativelyFocusable && tabIndexAttr === null) {
+        // 非原生可聚焦元素又没给 tabindex：浏览器不会把它放进 Tab 序
+        unreachable = true;
+      }
+      if (!unreachable) continue;
+      // 合法的 roving 组：整组只有一个 Tab 停点，但组内所有项都能用方向键到达
+      if (isInLegitRovingGroup(element)) continue;
+      unreachableInteractive.push({ html: describe(element) });
+    }
+
     // prefers-reduced-motion 的实际响应在 Node 侧用 emulateMediaFeatures 测
     // （见 main() 里的 auditReducedMotion），这里不做启发式猜测 ——
     // 原来那版只要页面上有一个 transition 就返回 true，等于永远通过，是假测试。
@@ -642,6 +928,7 @@ async function auditPage(page: Page): Promise<RawAudit> {
       lowContrast,
       prefersReducedMotion,
       tabbableCount,
+      unreachableInteractive,
       positiveTabIndex,
     };
   });
@@ -738,8 +1025,30 @@ function judge(route: string, raw: RawAudit): void {
   for (const entry of raw.positiveTabIndex) {
     report(route, 'warning', 'tabindex-positive', `tabindex="${entry.tabIndex}" 会打乱 Tab 顺序：${entry.html}`);
   }
+  /*
+   * 键盘可达的两个层次：
+   *
+   * 1. 整页没有任何可聚焦元素 —— 这是「彻底不能操作」，critical。
+   *    但注意它几乎不可能触发（每个页面都有导航链接），所以它单独存在时
+   *    实际上是一条**永远通过**的规则。真正干活的是第 2 条。
+   * 2. 有交互语义的元素却进不了 Tab 序 —— 这是现实中最常见的缺陷形态：
+   *    工具按钮写成 <div onClick>、给 <button> 加 tabindex="-1"。
+   *    键盘用户看得到、点不到，而审计此前对此完全沉默。
+   */
   if (raw.tabbableCount === 0) {
     report(route, 'critical', 'keyboard-unreachable', '页面没有任何可用 Tab 聚焦的元素');
+  } else if (raw.unreachableInteractive.length > 0) {
+    report(
+      route,
+      'critical',
+      'keyboard-unreachable',
+      `${raw.unreachableInteractive.length} 个交互元素 Tab 不到（键盘用户无法操作）：` +
+        raw.unreachableInteractive
+          .slice(0, 3)
+          .map((entry) => entry.html)
+          .join(' | ') +
+        (raw.unreachableInteractive.length > 3 ? ' …' : ''),
+    );
   }
 }
 
@@ -772,17 +1081,46 @@ async function auditReducedMotion(page: Page, route: string): Promise<void> {
       return count;
     });
 
+  /**
+   * 重新加载并等到「动效元素数量稳定」再读。
+   *
+   * 原来固定 `domcontentloaded` + 500ms 就读数。问题是 React 渲染是异步的：
+   * 500ms 时页面可能只挂载了一部分，读到的是一个**中间态**数字。
+   * 实测同一个 `/sandbox`：
+   *   - 充足等待后：no-preference = 68，reduce = 0（完全正常）
+   *   - 但固定 500ms 的那次审计读到的是 no-preference = 3，reduce = 3
+   *     → 判成「reduced-motion 未响应」，一个**假警告**。
+   *
+   * 3 个元素是怎么来的已经不重要了 —— 关键教训是：**用固定 sleep 去读
+   * 一个异步渲染页面的最终样式，读到什么都不奇怪。**
+   * 这里改成连续采样直到稳定（连续 3 次相同），和 `waitForStableDom` 同一思路。
+   */
+  const reloadUntilStable = async (): Promise<number> => {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    let last = -1;
+    let same = 0;
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const current = await countMotion();
+      if (current === last) {
+        same += 1;
+        if (same >= 3) return current;
+      } else {
+        last = current;
+        same = 0;
+      }
+    }
+    return last;
+  };
+
   // 正常模式
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  const normalMotion = await countMotion();
+  const normalMotion = await reloadUntilStable();
 
   // 减弱模式
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  const reducedMotion = await countMotion();
+  const reducedMotion = await reloadUntilStable();
 
   // 恢复默认，避免影响后续路由
   await page.emulateMediaFeatures([]);
@@ -793,13 +1131,34 @@ async function auditReducedMotion(page: Page, route: string): Promise<void> {
     return;
   }
 
-  if (reducedMotion >= normalMotion) {
+  /*
+   * 判定阈值：reduce 模式下的动效元素必须**降到正常模式的 20% 以内**。
+   *
+   * 原来的判据是 `reducedMotion >= normalMotion` —— 意思只有「一个都没减少」才算失败。
+   * 一个页面正常 100 个动效、reduce 下还剩 99 个，照样通过。这等于没有约束力：
+   * CONTRACT/HANDOVER 声明的「系统级减弱动效已响应」实际从未被真正验证过。
+   *
+   * 为什么不用「必须严格等于 0」：transition 收尾帧、以及框架层面的
+   * 一次性过渡（如路由淡出）即使在 reduce 下也可能留下极少量残留，
+   * 卡死 0 会制造与真实缺陷无关的假失败。
+   * 因此给一个**绝对值容忍**：只要残留 ≤ RESIDUAL_TOLERANCE 个，视为已响应。
+   *
+   * 两个口径取较宽松者：
+   *   - 比例口径：reduced <= normal * 0.2（大页面有足够统计意义）
+   *   - 绝对口径：reduced <= 5（小页面 normal 只有 6 个时，0.2 倍 = 1，太苛刻）
+   */
+  const REDUCED_RATIO = 0.2;
+  const RESIDUAL_TOLERANCE = 5;
+  const ratioLimit = Math.floor(normalMotion * REDUCED_RATIO);
+  const allowed = Math.max(ratioLimit, Math.min(RESIDUAL_TOLERANCE, normalMotion - 1));
+
+  if (reducedMotion > allowed) {
     report(
       route,
       'warning',
       'reduced-motion',
-      `系统开启「减弱动效」后仍有 ${reducedMotion} 个元素带动效（正常模式下 ${normalMotion} 个），` +
-        '说明 prefers-reduced-motion 未被响应（HANDOVER §3 P2）',
+      `系统开启「减弱动效」后仍有 ${reducedMotion} 个元素带动效（正常模式 ${normalMotion} 个，` +
+        `允许残留 ≤ ${allowed} 个），说明 prefers-reduced-motion 未被充分响应（HANDOVER §3 P2）`,
     );
     return;
   }
@@ -1024,8 +1383,8 @@ async function main(): Promise<void> {
     console.error('✗ 找不到 Chrome / Edge，无法做 a11y 审计。');
     process.exit(2);
   }
-  if (!existsSync(path.resolve(process.cwd(), 'dist/index.html'))) {
-    console.error('✗ 没有 dist/index.html，请先运行：npx vite build');
+  if (!existsSync(path.join(DIST_DIR, 'index.html'))) {
+    console.error(`✗ 没有 ${path.join(DIST_DIR, 'index.html')}，请先运行：npx vite build`);
     process.exit(2);
   }
 
@@ -1047,6 +1406,12 @@ async function main(): Promise<void> {
   const preview = startPreview();
   let browser: Browser | undefined;
   let hardFailure = false;
+  /*
+   * 收尾自检的结果。只做提示，不改变本轮审计结论 ——
+   * 审计结论描述的是「这一轮页面上的无障碍情况」，而端口残留是
+   * **环境问题**，混进 exit code 会让「无障碍失败」和「清理失败」分不清。
+   */
+  let cleanupWarning = false;
 
   try {
     if (!(await waitForServer(`${BASE}/`))) {
@@ -1118,8 +1483,22 @@ async function main(): Promise<void> {
     console.error(`\n✗ 审计过程出错：${String(error)}`);
   } finally {
     if (browser) await browser.close().catch(() => undefined);
-    stopPreview(preview);
+    await stopPreview(preview);
     await new Promise((resolve) => setTimeout(resolve, 400));
+    /*
+     * 收尾自检：清理失败要**当场可见**，而不是等下一次跑报 exit=2。
+     * 「清理路径本身没被验证过」是这个脚本真实翻车过的原因 ——
+     * stopPreview 静默失效时，症状会在**下一次**运行时才出现，
+     * 于是很容易被误判成「新的 flake」。
+     */
+    if (await isPortListening(PORT)) {
+      console.error(
+        `⚠ 收尾异常：port ${PORT} 在 stopPreview 之后仍在监听。\n` +
+          '  本次审计结果本身有效，但下次运行可能因端口被占而 exit=2。\n' +
+          `  处理：Get-NetTCPConnection -LocalPort ${PORT} -State Listen | % { Stop-Process -Id $_.OwningProcess -Force }`,
+      );
+      cleanupWarning = true;
+    }
   }
 
   const { critical, warning } = printReport();
@@ -1232,6 +1611,16 @@ async function main(): Promise<void> {
         ? `\n✓ 无障碍审计通过（未新增问题；历史存量 ${critical} 项 critical 记录在基线中）`
         : '\n✓ 无障碍审计通过',
   );
+
+  /*
+   * 清理失败必须出现在总结里，但**不改变 exit code**：
+   * 「无障碍失败」和「环境没收拾干净」是两件事，混在一起会让人
+   * 下次看到 exit=1 时分不清该修页面还是该查端口。
+   */
+  if (cleanupWarning) {
+    console.log(`\n⚠ 注意：本次审计结果有效，但 ${PORT} 端口未成功释放（见上方提示）。`);
+  }
+
   process.exit(failed ? 1 : 0);
 }
 

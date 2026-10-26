@@ -4,34 +4,35 @@
  * 2. 滑块 input 事件后 api 是否收到 scaleItem
  * 3. 保存后 localStorage 到底写了哪些 key
  */
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
+import { launchPreview } from './_shared/preview.mjs';
 
 const CHROME = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
 ].find(existsSync);
-const port = 4181;
-const base = `http://127.0.0.1:${port}`;
+const preferredPort = 4181;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const preview = spawn(
-  process.platform === 'win32' ? 'npx.cmd' : 'npx',
-  ['vite', 'preview', '--port', String(port), '--strictPort'],
-  { cwd: process.cwd(), shell: process.platform === 'win32', stdio: 'ignore' },
-);
+/*
+ * 起 preview 统一走 `_shared/preview.mjs`。
+ *
+ * 这里原来是 `spawn('npx.cmd', [...], { shell: true })` + 收尾 `preview.kill()`：
+ * Windows 上 `shell: true` 会套一层 cmd.exe，kill 只杀 cmd.exe，
+ * **vite 变孤儿继续占着 4181**。实测修前每次跑完残留 1 个、端口仍在 Listen。
+ * 注意这个脚本的端口原来是**硬编码 4181**，撞上了没有退路；
+ * 现在通过 `pickFreePort` 让路。
+ *
+ * 现在：直接 spawn `node vite.js`（单进程，kill 即真 kill），
+ * 且 `stopPreview` 会等到进程真的退出再返回。
+ */
+const preview = await launchPreview({ port: preferredPort, distDir: 'dist' });
+const base = preview.base;
+console.log(`使用端口 ${preview.port}（首选 ${preferredPort}）`);
 
 let browser;
 try {
-  for (let i = 0; i < 60; i += 1) {
-    try {
-      if ((await fetch(`${base}/`)).ok) break;
-    } catch {
-      /* retry */
-    }
-    await sleep(300);
-  }
   browser = await puppeteer.launch({
     executablePath: CHROME,
     headless: true,
@@ -214,5 +215,6 @@ try {
   console.error('探针异常:', error);
 } finally {
   if (browser) await browser.close();
-  preview.kill();
+  /* 关键：等到 vite 真的断气才返回，否则连跑两次会撞端口 */
+  await preview.close();
 }
