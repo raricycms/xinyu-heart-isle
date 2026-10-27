@@ -283,7 +283,7 @@ import { coerceSession, migrateSnapshot } from '@/format/migrate';
 | `replayAll` 4000 事件 | ≤ 60ms | 单元测试（实测 1.3ms） |
 | `computeSessionStats` 4000 事件 | ≤ 30ms | 单元测试（实测 1.3ms） |
 | 触摸目标 | ≥ 44×44px | `scripts/audit/a11y.ts` |
-| 键盘可达 | 沙盘全部操作可用键盘 | **大部分自动化，有一处真实缺口**：`a11y.ts` 的 `keyboard-unreachable` 覆盖 15 条路由（检查交互元素是否在 Tab 序内，有变异证据）；`smoke.ts` 的 `keyboard-flow` 场景（12 断言）覆盖完整键盘流程：聚焦沙具库 → 方向键换格 → Enter 放入 → 方向键调整摆件位置 → 事件流写入。变异证据见 `scripts/audit/keyboard-self-test.mjs`。**缺口**：该流程只在 `dom2d` 渲染器下成立；默认的 `iso2d` 把摆件画在 `<canvas>` 上，仅提供 `sr-only` 只读清单，**键盘无法调整已放置摆件的位置**（`three` 同理）。即：键盘能完成全流程，但需先主动切换渲染器。 |
+| 键盘可达 | 沙盘全部操作可用键盘 | **默认渲染器下已完整可用**：`a11y.ts` 的 `keyboard-unreachable` 覆盖 15 条路由（检查交互元素是否在 Tab 序内，有变异证据）；`smoke.ts` 的 `keyboard-flow` 场景（**21 断言**）在**默认 `iso2d`** 下走完整键盘流程：聚焦沙具库 → 方向键换格 → Enter 放入 → **Tab 到摆件按钮 → 方向键调整位置** → Enter 选中 → 事件流写入 → 焦点可见。变异证据见 `scripts/audit/keyboard-self-test.mjs`。<br>**v2.0 收尾修的缺口**：此前该流程只在 `dom2d` 下成立 —— `iso2d` 把摆件画在 `<canvas>` 上，仅提供一个 `sr-only` **只读**清单，键盘用户能听到摆件但动不了。现已把该清单升级为真按钮组（`role="group"` + `<button>`），键位与 `dom2d` 完全一致，并补上 `.sr-only:focus-visible` 展开以满足 WCAG 2.4.7 焦点可见。<br>**仍存的边界**：`three`（可选 3D 渲染器，非默认）没有摆件键盘入口。 |
 | 对比度 | 正文 ≥ 4.5:1 | `scripts/audit/a11y.ts` |
 
 

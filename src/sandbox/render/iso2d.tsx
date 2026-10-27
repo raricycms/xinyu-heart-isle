@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { getScene } from '@/sandbox/scenes';
 import { glyphFor, imageFor, imageReady, loadImage } from '@/sandbox/render/symbolSource';
+import { symbolLabel } from '@/sandbox/symbols';
 import { computeSandCells, glossFill, GLOSS_H_RATIO, GLOSS_INSET_X, GLOSS_INSET_Y, GLOSS_W_RATIO } from '@/sandbox/surface/sandCells';
 import type { SandCell, Tray } from '@/sandbox/surface/sandCells';
 import { useBrush } from '@/sandbox/surface/useBrush';
@@ -309,6 +310,42 @@ export function Iso2DRenderer({
     if (hit) onItemActivate?.(hit);
   };
 
+  /**
+   * 摆件的键盘操作。键位与 `dom2d.tsx` 的 `handleKeyDown` **必须一致** ——
+   * 同一个产品里两套键盘语义，用户换个渲染器就断手。
+   *
+   * 步长 0.02 / Shift 0.1 也和 dom2d 对齐（0.02 约等于画布上 2–3px，
+   * 够精细；Shift 加速用于大跨度挪动）。
+   *
+   * 边界用 clamp 到 [0,1]，和 dom2d 一样 —— 拖出沙盘外会让摆件
+   * 永远看不见，用户以为它被删了。
+   */
+  const handleItemKeyDown = (event: React.KeyboardEvent, item: SandboxItem) => {
+    if (readOnly) return;
+    const step = event.shiftKey ? 0.1 : 0.02;
+    const deltas: Record<string, { x: number; y: number }> = {
+      ArrowUp: { x: 0, y: -step },
+      ArrowDown: { x: 0, y: step },
+      ArrowLeft: { x: -step, y: 0 },
+      ArrowRight: { x: step, y: 0 },
+    };
+    const delta = deltas[event.key];
+    if (!delta) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onItemActivate?.(item);
+      }
+      return;
+    }
+    event.preventDefault();
+    const from = { x: item.x, y: item.y };
+    const to = {
+      x: Math.min(1, Math.max(0, item.x + delta.x)),
+      y: Math.min(1, Math.max(0, item.y + delta.y)),
+    };
+    onItemCommit?.(item.id, from, to);
+  };
+
   const cursorClass = brush ? 'iso2d--brush' : readOnly ? '' : 'iso2d--grab';
   /*
    * `.ss-drawable` 提供 `touch-action: none`（见 styles/sandbox-surface.css）：
@@ -339,13 +376,60 @@ export function Iso2DRenderer({
     >
       <canvas ref={baseRef} className="iso2d__canvas" aria-hidden="true" />
       <canvas ref={overlayRef} className="iso2d__canvas iso2d__canvas--overlay" aria-hidden="true" />
-      {/* 读屏与键盘的等价入口 */}
-      <div className="sr-only" role="list" aria-label="摆件清单">
-        {items.map((item) => (
-          <div role="listitem" key={item.id}>
-            {glyphFor(item.symbolId)} 注释：{item.note ?? '无'}
-          </div>
-        ))}
+      {/*
+       * 读屏与键盘的等价入口。
+       *
+       * ── 这里曾经只是个只读清单 ──────────────────────────────────
+       *
+       * 原来它是 `role="list"` + 纯文本，只能"听到"有哪些摆件，
+       * 想移动必须用鼠标。而 iso2d 是**默认渲染器** ——
+       * 也就是说默认配置下键盘用户无法操作摆件，
+       * 而 "键盘可用" 是 WCAG 2.1 AA 的硬要求。
+       *
+       * （dom2d 渲染器没这个问题：它用真实 <button>，天然可 Tab。）
+       *
+       * ── 现在它是真按钮 ──────────────────────────────────────────
+       *
+       * Tab 可聚焦、方向键移动、Enter/空格编辑，
+       * 和 dom2d 的键位完全一致（见 dom2d.tsx handleKeyDown）。
+       * 视觉上仍然 `sr-only` —— 它服务的就是不看画面的人，
+       * 而看得见画面的人有 canvas 上的指针操作。
+       *
+       * 为什么不做成"canvas 上一个透明可聚焦层"：
+       * 那样焦点顺序和视觉位置对不上，读屏用户会听到
+       * 一个没有名字的元素。用真实按钮列表，顺序与 z 序一致，
+       * 每个按钮的 aria-label 说清它是谁、在哪。
+       */}
+      <div
+        className="sr-only"
+        role="group"
+        aria-label={
+          items.length === 0
+            ? '摆件清单：还没有摆件'
+            : `摆件清单，共 ${items.length} 个。用 Tab 选择，方向键移动，Enter 编辑。`
+        }
+      >
+        {[...items]
+          .sort((a, b) => a.z - b.z)
+          .map((item) => {
+            const selected = item.id === selectedId;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                aria-label={`${symbolLabel(item.symbolId)}${item.note ? `，注释：${item.note}` : ''}，位置 ${Math.round(item.x * 100)}% , ${Math.round(item.y * 100)}%`}
+                aria-pressed={selected}
+                disabled={readOnly}
+                tabIndex={0}
+                onFocus={() => onSelect(item.id)}
+                onClick={() => onSelect(item.id)}
+                onKeyDown={(event) => handleItemKeyDown(event, item)}
+                onDoubleClick={() => onItemActivate?.(item)}
+              >
+                {glyphFor(item.symbolId)}
+              </button>
+            );
+          })}
       </div>
     </div>
   );

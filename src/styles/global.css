@@ -986,6 +986,70 @@ svg {
   border: 0;
 }
 
+/*
+ * 可操作的 `.sr-only` 元素在获得焦点时必须露出来。
+ *
+ * ── 为什么需要这条 ──────────────────────────────────────────────
+ *
+ * `.sr-only` 用 `clip: rect(0,0,0,0)` 把元素缩到 1px，它对读屏
+ * 仍然可读、对键盘仍然可聚焦 —— 这正是我们要的。
+ *
+ * 但对**低视力键盘用户**（能看见一点、主要靠 Tab + 焦点框导航）
+ * 来说，焦点落到一个看不见的元素上，等于焦点消失了。
+ * 他们会以为自己按错了，然后放弃。
+ *
+ * WCAG 2.4.7（Focus Visible, AA）要求键盘焦点必须可见。
+ *
+ * ── 用在哪儿 ────────────────────────────────────────────────────
+ *
+ * `iso2d.tsx` 里的摆件清单：视觉用户用鼠标拖 canvas，
+ * 键盘用户用这份按钮列表移动摆件。后者聚焦时展开成可见列表。
+ *
+ * 只在 `:focus-visible` 时展开 —— 鼠标点击不展开，
+ * 否则点一下就冒出一个列表，视觉用户会莫名其妙。
+ */
+.sr-only:focus-visible,
+.sr-only:focus-within {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: var(--sp-2);
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+  background: var(--c-surface);
+  border: 2px solid var(--c-accent);
+  border-radius: var(--r-sm);
+  z-index: 30;
+}
+
+/* 展开后按钮也要有清楚的焦点框和触摸目标 */
+.sr-only:focus-visible button,
+.sr-only:focus-within button {
+  min-width: 44px;
+  min-height: 44px;
+  margin: 2px;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--c-bg);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-sm);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.sr-only:focus-visible button:focus-visible,
+.sr-only:focus-within button:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 1px;
+}
+
+.sr-only:focus-visible button[aria-pressed='true'],
+.sr-only:focus-within button[aria-pressed='true'] {
+  background: var(--c-accent-soft);
+  border-color: var(--c-accent);
+}
+
 .mt-2 { margin-top: var(--sp-2); }
 .mt-3 { margin-top: var(--sp-3); }
 .mt-4 { margin-top: var(--sp-4); }

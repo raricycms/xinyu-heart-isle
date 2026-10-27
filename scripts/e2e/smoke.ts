@@ -1707,7 +1707,7 @@ const scenarios: Scenario[] = [
    */
   {
     id: 'keyboard-flow',
-    name: '键盘全流程：Tab 进库 → 方向键 → Enter 放入 → 方向键移动',
+    name: '键盘全流程（默认 iso2d）：Tab 进库 → Enter 放入 → 方向键移动摆件',
     run: async (page, errors, _requests) => {
       await page.goto(`${BASE}/sandbox`, { waitUntil: 'domcontentloaded' });
       const anchor = await waitAny(page, ['[data-testid="sandbox-stage"]', '[data-testid="sandbox-events"]']);
@@ -1776,58 +1776,149 @@ const scenarios: Scenario[] = [
 
       // ④ 焦点到摆件上，方向键改变坐标
       /*
-       * ⚠️ 这里必须先切到 `dom2d` 渲染器，原因是一个**真实的能力缺口**：
+       * 这一步曾经必须先切到 `dom2d` 渲染器，原因是一个**真实的能力缺口**：
+       * 默认渲染器 `iso2d` 的摆件画在 `<canvas>` 上，只额外提供
+       * 一个 `sr-only` 的 `role="list"` 清单 —— **纯文本，不可操作**。
+       * 「方向键移动摆件」的 handler 只存在于 `dom2d.tsx`。
        *
-       * 默认渲染器是 `iso2d`（2.5D 轴测），摆件画在 `<canvas>` 上，
-       * 只额外提供一个 `sr-only` 的 `role="list"` 摆件清单 —— **纯文本，不可操作**。
-       * 「方向键移动摆件」的 `handleKeyDown` 只存在于 `dom2d.tsx`，
-       * 在 iso2d 下键盘用户**无法调整已放置摆件的位置**。
+       * 这个缺口已经补上了：`iso2d` 的读屏清单现在是**真按钮**
+       * （role="group" + button，Tab 可聚焦、方向键移动、Enter 选中），
+       * 键位与 dom2d 完全一致（步长 0.02 / Shift 0.1）。
        *
-       * 所以完整的键盘流程是这样的：工具栏的渲染器 `<select>` 本身就是
-       * 原生控件（键盘可达）→ 选「DOM（无障碍）」→ 摆件变成真实 DOM 按钮
-       * → 方向键微调。能力存在，但**默认视图里没有**。
-       *
-       * 这条限制已记入 docs/TESTING.md 与 CONTRACT §7，不假装已覆盖。
+       * 所以这个场景现在**不需要切渲染器** —— 直接在默认视图里
+       * 走完整键盘流程。这比原来强：原来验的是"用户手动换个渲染器
+       * 之后键盘可用"，那对绝大多数用户（不知道有这个选项）等于没有。
        */
-      const switched = await page.evaluate(() => {
+      const rendererNow = await page.evaluate(() => {
         const select = Array.from(document.querySelectorAll<HTMLSelectElement>('select')).find((node) =>
-          Array.from(node.options).some((option) => option.value === 'dom2d'),
+          Array.from(node.options).some((option) => option.value === 'iso2d'),
         );
-        if (!select) return null;
-        select.focus();
-        select.value = 'dom2d';
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-        return { focused: document.activeElement === select, options: select.options.length };
+        return select?.value ?? null;
       });
-      expectTrue('渲染器选择框键盘可达且含 dom2d', switched !== null, `选项数 ${switched?.options}`);
-      expectTrue('渲染器选择框能聚焦', switched?.focused === true);
-
-      await new Promise((resolve) => setTimeout(resolve, 800));
-
-      const itemKeys = await page.evaluate(() => {
-        const item = document.querySelector<HTMLElement>('.dom2d__item');
-        if (!item) return null;
-        item.focus();
-        const before = item.getAttribute('style') ?? '';
-        item.dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }),
-        );
-        return { focused: document.activeElement === item, styleBefore: before };
-      });
-      expectTrue('切到 dom2d 后摆件是真实 DOM 且可聚焦', itemKeys?.focused === true);
-
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      const styleAfter = await page
-        .evaluate(() => {
-          const item = document.querySelector<HTMLElement>('.dom2d__item');
-          return item?.getAttribute('style') ?? '';
-        })
-        .catch(() => '');
       expectTrue(
-        '方向键移动了摆件（style.left 变了）',
-        itemKeys !== null && styleAfter !== itemKeys.styleBefore,
-        `之前 "${itemKeys?.styleBefore}"，之后 "${styleAfter}"`,
+        '默认渲染器是 iso2d（这个场景验的就是它）',
+        rendererNow === 'iso2d',
+        `当前为 ${rendererNow}`,
       );
+
+      /*
+       * ② iso2d 的读屏/键盘入口必须是**可操作的真按钮**。
+       *
+       * 恒真断言的教训：这里必须先用 length > 0 把住，
+       * 否则 `[].every(...)` 恒为 true，摆件压根没放下去也会全绿。
+       */
+      const kbdEntry = await page.evaluate(() => {
+        const g = [...document.querySelectorAll<HTMLElement>('.sr-only[role="group"]')].find((el) =>
+          el.getAttribute('aria-label')?.includes('摆件清单'),
+        );
+        if (!g) return { found: false, count: 0, labels: [] as (string | null)[], tabIndexes: [] as number[] };
+        const btns = [...g.querySelectorAll<HTMLButtonElement>('button')];
+        return {
+          found: true,
+          count: btns.length,
+          labels: btns.map((b) => b.getAttribute('aria-label')),
+          tabIndexes: btns.map((b) => b.tabIndex),
+        };
+      });
+      expectTrue('iso2d 提供摆件清单（role=group）', kbdEntry.found === true);
+      expectTrue('  清单里有摆件按钮', kbdEntry.count > 0, `count=${kbdEntry.count}`);
+      expectTrue(
+        '  按钮可聚焦（tabIndex >= 0）',
+        kbdEntry.count > 0 && kbdEntry.tabIndexes.every((t) => t >= 0),
+        JSON.stringify(kbdEntry.tabIndexes),
+      );
+      expectTrue(
+        '  aria-label 带位置信息',
+        kbdEntry.count > 0 && kbdEntry.labels.every((l) => /位置 \d+%/.test(l ?? '')),
+        JSON.stringify(kbdEntry.labels),
+      );
+
+      /*
+       * ③ 方向键真的改变坐标 —— 这是整个场景的核心。
+       *
+       * 只验"能聚焦"是没用的：焦点能进去、aria-label 会说位置，
+       * 但按方向键什么也不发生的话，那些断言照样全绿。
+       * 所以必须读位置、按键、再读位置、比对差值。
+       */
+      const posBefore = (kbdEntry.labels[0] ?? '').match(/位置 (\d+)% , (\d+)%/);
+      expectTrue('能从 aria-label 解析出位置', posBefore !== null, String(kbdEntry.labels[0]));
+
+      await page.evaluate(() => {
+        const g = [...document.querySelectorAll<HTMLElement>('.sr-only[role="group"]')].find((el) =>
+          el.getAttribute('aria-label')?.includes('摆件清单'),
+        );
+        g?.querySelector<HTMLButtonElement>('button')?.focus();
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const focusedIsButton = await page.evaluate(() => document.activeElement?.tagName === 'BUTTON');
+      expectTrue('焦点落在摆件按钮上', focusedIsButton === true);
+
+      /* 5 次 → 键 = 0.02 × 5 = 0.1，即约 10% */
+      for (let i = 0; i < 5; i += 1) {
+        await page.keyboard.press('ArrowRight');
+        await new Promise((resolve) => setTimeout(resolve, 90));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 350));
+
+      const posAfter = await page
+        .evaluate(() => {
+          const g = [...document.querySelectorAll<HTMLElement>('.sr-only[role="group"]')].find((el) =>
+            el.getAttribute('aria-label')?.includes('摆件清单'),
+          );
+          return g?.querySelector<HTMLButtonElement>('button')?.getAttribute('aria-label') ?? null;
+        })
+        .catch(() => null);
+      const afterMatch = (posAfter ?? '').match(/位置 (\d+)% , (\d+)%/);
+      expectTrue(
+        '方向键移动了摆件（位置变了）',
+        afterMatch !== null && posBefore !== null && afterMatch[1] !== posBefore[1],
+        `之前 ${posBefore?.[1]}%，之后 ${afterMatch?.[1]}%`,
+      );
+      expectTrue(
+        '移动量符合 0.02 × 5 ≈ 10%',
+        afterMatch !== null && posBefore !== null && Math.abs(Number(afterMatch[1]) - Number(posBefore[1]) - 10) <= 2,
+        `delta=${afterMatch && posBefore ? Number(afterMatch[1]) - Number(posBefore[1]) : '?'}%`,
+      );
+
+      /* 上方向键 */
+      const yBefore = afterMatch ? Number(afterMatch[2]) : -1;
+      await page.keyboard.press('ArrowUp');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const posAfterUp = await page.evaluate(() => {
+        const g = [...document.querySelectorAll<HTMLElement>('.sr-only[role="group"]')].find((el) =>
+          el.getAttribute('aria-label')?.includes('摆件清单'),
+        );
+        return g?.querySelector<HTMLButtonElement>('button')?.getAttribute('aria-label') ?? null;
+      });
+      const upMatch = (posAfterUp ?? '').match(/位置 (\d+)% , (\d+)%/);
+      expectTrue(
+        '上方向键改变纵坐标',
+        upMatch !== null && Number(upMatch[2]) !== yBefore,
+        `y: ${yBefore}% → ${upMatch?.[2]}%`,
+      );
+
+      /*
+       * ④ Enter 选中该摆件，侧栏 Inspector 跟着更新。
+       *
+       * 注意 Enter 的真实契约是「选中」（SandboxPage.tsx L627：
+       * onItemActivate={(item) => setSelectedId(item.id)}），
+       * 不是弹窗 —— 编辑面板是侧栏，由选中态驱动。
+       */
+      await page.keyboard.press('Enter');
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      const selected = await page.evaluate(() => {
+        const g = [...document.querySelectorAll<HTMLElement>('.sr-only[role="group"]')].find((el) =>
+          el.getAttribute('aria-label')?.includes('摆件清单'),
+        );
+        const first = g?.querySelector<HTMLButtonElement>('button');
+        return {
+          pressed: first?.getAttribute('aria-pressed') ?? null,
+          inspector: document.querySelector('.wb-inspector') !== null,
+        };
+      });
+      expectTrue('Enter 后被聚焦摆件处于选中态', selected.pressed === 'true', `pressed=${selected.pressed}`);
+      expectTrue('侧栏 Inspector 已打开', selected.inspector === true);
 
       /*
        * ⑤ 键盘操作也要产生事件（否则「可回放」在键盘路径上是空的）
@@ -1839,6 +1930,24 @@ const scenarios: Scenario[] = [
         '键盘操作也写入了事件流',
         Number(eventCountText.replace(/\D/g, '') || '0') > 0,
         `事件数 "${eventCountText}"`,
+      );
+
+      /*
+       * ⑥ 焦点可见（WCAG 2.4.7）：`.sr-only` 用 clip 藏起来，
+       * 聚焦时必须展开，否则低视力键盘用户看不到焦点在哪。
+       */
+      const focusVisible = await page.evaluate(() => {
+        const g = [...document.querySelectorAll<HTMLElement>('.sr-only[role="group"]')].find((el) =>
+          el.getAttribute('aria-label')?.includes('摆件清单'),
+        );
+        if (!g) return null;
+        const r = g.getBoundingClientRect();
+        return { w: Math.round(r.width), h: Math.round(r.height) };
+      });
+      expectTrue(
+        '聚焦时清单展开成可见尺寸（焦点可见）',
+        focusVisible !== null && focusVisible.w > 40 && focusVisible.h > 20,
+        JSON.stringify(focusVisible),
       );
 
       expectTrue('无 console.error', errors.length === 0, errors.join(' | '));
