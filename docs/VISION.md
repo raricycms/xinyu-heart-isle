@@ -373,7 +373,7 @@ consent_photo, final_snapshot, replay_uri, therapist_edited
 | 数据格式规范 | `sandplay-session/v1` JSON Schema + 迁移函数 + 校验器（`npx sandplay-validate`） | ✅ `docs/FORMAT.md` + `public/schema/` + `scripts/validate-session.ts` |
 | 沙具包规范 | `symbol-pack/v1`：manifest（id/名称/授权/作者/版本）+ 资产 + 分类；CLI 校验 | ✅ 收尾补齐：`docs/SYMBOL_PACK.md`（§1.5 有手把手教程）+ `scripts/validate-pack.ts` + 三个样例（字形 / 内嵌图片 / 故意写坏）+ `validate-pack-self-test.mjs` 52 项自测。**此前只有实现，没有文档和 CLI** —— 外部开发者无从下手 |
 | 插件点 | 渲染器、笔刷、场景主题、导出格式（先留接口，不承诺 API 稳定） | 🟡 渲染器接口稳定（`SandRendererProps`）；笔刷/场景/导出格式**未抽成插件点** |
-| 文档 | 快速开始、格式规范、沙具包制作、常见问题、临床使用建议（由顾问审） | 🟡 格式规范 ✅、沙具包制作 ✅、快速开始 ✅（`CONTRIBUTING.md` §开发环境）；FAQ 散在各文档；**临床使用建议缺，且需顾问审** ⛔ |
+| 文档 | 快速开始、格式规范、沙具包制作、常见问题、临床使用建议（由顾问审） | 🟡 格式规范 ✅、沙具包制作 ✅、快速开始 ✅（`CONTRIBUTING.md` §开发环境）、**常见问题 ✅ 收尾补齐**（`docs/FAQ.md`：数据在哪 / 会不会上传 / 沙盘怎么用 / 沙具包 / 无障碍与兼容 / 贡献 / 许可；48 项技术断言由 `faq-claims.mjs` 守住 —— 写这份 FAQ 时它当场抓到我写错的一个文件路径）；**临床使用建议缺，且需顾问审** ⛔ |
 | 社区 | CONTRIBUTING、CODE_OF_CONDUCT、issue 模板、good first issue、公开 roadmap | ✅ 全部落地：`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、`ROADMAP.md`、`.github/ISSUE_TEMPLATE/`（3 个模板）、`GOOD_FIRST_ISSUES.md`、`.github/workflows/quality.yml` |
 | 临床顾问 | 至少 1 位持证咨询师/督导师署名审阅临床相关文案与流程 | ⛔ **未完成**（上线阻断项，需真人） |
 | i18n | 中/英起步，文案与代码分离。**实际边界（v2.0）**：沙盘模块全量双语（175 键 × 2，`useI18n()` 覆盖工作台/回放/记录单/档案/对比/统计）；其余页面仍是中文硬编码。`/about` 有语言切换，切换后沙盘模块真的变英文；文案里如实写明这个边界，不假装全站双语 | ✅ 沙盘模块双语；其余页面中文（v2.5） |
