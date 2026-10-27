@@ -200,7 +200,7 @@ npm run typecheck  # TypeScript 严格检查（应用 + scripts/）
 npm run test       # 单元 + 性能测试（vitest）
 npm run build      # 生产构建
 npm run preview    # 预览构建产物
-npm run check      # 一键跑全部门禁（类型、幽灵字段、i18n、CSS、文档数字、构建、体积、单测、两份校验器、E2E、视觉、渲染性能、a11y、首屏性能）
+npm run check      # 一键跑全部门禁（类型、幽灵字段、死组件、i18n、CSS、文档数字、构建、体积、单测、两份校验器、E2E、视觉、渲染性能、a11y、首屏性能）
 ```
 
 > **`npm run e2e` 不会先构建** —— 它跑的是已有的 `dist/`。

@@ -1432,6 +1432,69 @@ v2.0 收尾时对账一次，结果是 81 处引用、27 个从未定义的 toke
 
 如果我当时信了这个数字去改文档，就会把 19 改成 1，把正确的文档改坏。
 
+---
+
+### 4.z 死组件门禁：`scripts/audit/dead-components.mjs`（`npm run audit:dead`）
+
+§9 的待办里，这条被搁置了很久，理由是「有假阳性风险（公共 API 会被
+误判），需要先设计白名单机制」。这个理由让它躺了整整一个版本。
+
+#### 先量，再设计
+
+真正动手时做的第一件事不是写门禁，而是**探查真实假阳性率**：
+147 个导出里有多少是"无外部引用"的？
+
+结果：**11 个，而且一个真死组件都没有** —— 全是常量/配置表
+（`STORES`、`DEFAULT_PREFERENCES`、`TOOL_CATEGORIES`…），
+它们被本文件内部使用，只是 `export` 了而已。
+
+也就是说，那条"假阳性风险"的担忧被夸大了。真正的风险是另一种：
+**把常量误判成组件**。
+
+#### 判据（收紧到只抓组件）
+
+同时满足四条才报「死」：
+
+1. 在 `.tsx` 文件里（`.ts` 里的全是常量/函数，不参与）
+2. 名字以大写开头（React 组件惯例）
+3. 在别的文件里**一次都没出现**
+4. 在本文件里除了声明行之外**没有被使用**
+
+第 4 条是关键：`export function Foo()` 之后本文件里再没出现 `Foo`，
+说明它既没被外部用、也没被内部组合 —— 真死。
+
+#### 为什么不用 TypeScript AST
+
+因为判据的本质是「这个名字在别处出现过吗」，词边界匹配就够。
+AST 精确，但会让门禁依赖 `typescript` 包的内部 API ——
+升级 TS 时门禁可能先坏，那是最难受的一种维护负担。
+
+#### 自测：漏报和误报都验
+
+第一次跑就说「✓ 没有死组件」，这有两种可能：代码干净，或判据
+什么都抓不到。所以 `dead-components-self-test.mjs`（17 项）
+**双向验证**：
+
+| 方向 | 用例 |
+| --- | --- |
+| 漏报 | 造一个 `TotallyDeadProbe`，必须被抓到、报出文件行号、给出三种建议 |
+| 误报 | 内部辅助组件、被其他文件引用的、`SCREAMING_CASE` 常量、白名单里的示例组件 —— 都不能报 |
+| 模式 | `--report-only` 退出 0 但仍列出问题；清理后回到绿 |
+
+> 写自测时踩了一个坑：第一版用 `execFileSync`，成功时只返回 stdout。
+> 而 `--report-only` 的设计是「问题列表走 stderr、退出码仍为 0」，
+> 于是自测看到「退出 0 且无输出」，误判成"没列出问题"，红了一条。
+> **产品代码是对的，测试的捕获方式错了。** 改用 `spawnSync`。
+
+#### 白名单只有 1 条
+
+`SurfaceWorkbenchExample`（`src/sandbox/surface/usage.example.tsx`）——
+用法示例文件，设计上不被引用是**正确状态**。它自己有 JSDoc 警告
+说「不要 import 这个文件」。
+
+白名单的纪律：每条必须写清理由，「临时」「先放着」不算理由 ——
+那种条目会在半年后变成没人敢删的僵尸。
+
 > **当一个审计器给出反直觉的数字时，先怀疑审计器。**
 
 ---
@@ -1699,15 +1762,22 @@ jobs:
       - run: node scripts/audit/ghost-fields.mjs --strict   # 每个偏好字段必须有读有写
       - run: node scripts/audit/ghost-fields-self-test.mjs  # 检测器自己会红吗
 
+      # ---- 死组件（§4.7.2 第六类的门禁化）----
+      - run: node scripts/audit/dead-components.mjs          # 导出的组件有人用吗
+      - run: node scripts/audit/dead-components-self-test.mjs # 漏报与误报都验过吗
+
       # ---- i18n / CSS / 体积预算 ----
       - run: node scripts/audit/i18n-dead-keys.mjs --strict
       - run: node scripts/audit/i18n-dead-keys-self-test.mjs
       - run: node scripts/audit/css-tokens.mjs
       - run: node scripts/audit/css-tokens-self-test.mjs
+      - run: node scripts/audit/css-tokens-flags-self-test.mjs  # --strict/--report-only 真的会被执行吗
       - run: node scripts/audit/bundle-budget.mjs           # 首屏 ≤200KB gzip（CONTRACT §7）
       - run: node scripts/audit/bundle-budget-self-test.mjs # 体积门禁自己会红吗
       - run: node scripts/audit/docs-numbers.mjs            # VISION 评分卡的数字与代码一致吗
       - run: node scripts/audit/docs-numbers-self-test.mjs  # 数字审计自己会红吗
+      - run: node scripts/audit/format-doc-self-test.mjs    # FORMAT.md §10.1 表里每一格都验过
+      - run: node scripts/audit/symbol-pack-doc-self-test.mjs # SYMBOL_PACK.md §1.5 的示例真的能跑
 
       # ---- 格式校验器（两份格式都要双向验证）----
       - run: node scripts/audit/validate-pack-self-test.mjs # 沙具包校验器：好包过、坏包红、文档一致
@@ -1902,8 +1972,16 @@ jobs:
 - [x] ~~补 `SandboxPage.tsx:496` 与 `RecordsPage.tsx:290` 的 label~~ —— 已补
 - [x] ~~沙盘全键盘流程的自动化~~ —— E2E「键盘全流程」12 项断言
       （Tab 进库 → 方向键 → Enter 放入 → 方向键移动），含视图缩放键盘入口
-- [ ] 装 CI（§7）—— 现在所有门禁都是绿的，可以直接接入
+- [x] ~~装 CI（§7）~~ —— 已落地 `.github/workflows/quality.yml`
+      （Windows runner，Node 22，`npm run check`）。
+      这条从「建议」变成「事实」的直接后果：`perf.ts` 判失败线松到 3× 预算、
+      `smoke.ts` 场景崩溃假绿，这两个活了很久的问题才有了被发现的机会。
 - [ ] 跨浏览器验证（目前只在 Chrome 跑过）
-- [ ] 死组件扫描（CONTRACT §9.5）目前是 `tmp/` 下的一次性脚本，
-      尚未做成 `npm run audit:*` 常规门禁 —— 它有假阳性风险
-      （公共 API 会被误判），需要先设计白名单机制再纳入
+      —— **需要真机，工程侧无法代劳**。风险已在 §6.2.5 写明：
+      iOS/Safari 是沙盘师的主要设备之一。
+- [x] ~~死组件扫描（CONTRACT §9.5）做成常规门禁~~ —— 已落地
+      `scripts/audit/dead-components.mjs` + 17 项自测，见 §4.z。
+      搁置时担心「假阳性风险」，实际先量了一次：147 个导出里
+      11 个"无外部引用"，**全是常量，一个真死组件都没有** ——
+      真正的风险是「把常量误判成组件」，判据收紧即可，不需要复杂白名单。
+      现在白名单只有 1 条（示例文件），且写明了理由。
