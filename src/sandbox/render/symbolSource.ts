@@ -63,8 +63,51 @@ export function imageFor(symbolId: string, imageMap?: Record<string, string>): s
  * 反复解码同一张图几十次，肉眼可见地卡。
  *
  * 缓存以 dataURL 为 key（同一符号的 id 可能变，但图片内容不变）。
+ *
+ * ── 为什么必须有上限 ────────────────────────────────────────────
+ *
+ * 这里存的是**已解码的 HTMLImageElement**，占的是位图内存，
+ * 不是 dataURL 字符串那点体积：一张 512×512 的 RGBA 图约 1MB，
+ * 而沙具包允许单张 dataURL 到 200KB —— 解码后往往膨胀好几倍。
+ *
+ * 没有上限时，一个含上千张图片的沙具包（MAX_PACK_SYMBOLS = 2000）
+ * 逐页翻过去，缓存只增不减。用户症状是"用久了标签页变卡/崩"，
+ * 而且**换一个会话不会好** —— 模块级 Map 活在整页生命周期里。
+ *
+ * 这正是 `docs/TESTING.md` §6.2.4 担心的形状。
+ *
+ * 用 LRU 而不是直接 limit：换出"最久没画过"的图，代价最小。
+ * `Map` 的迭代顺序就是插入顺序，删了再 set 就能把它挪到末尾，
+ * 不需要额外的双向链表。
  */
+const IMAGE_CACHE_LIMIT = 64;
 const imageCache = new Map<string, HTMLImageElement>();
+
+/**
+ * 把一张图放进缓存，超出上限时淘汰最久未使用的。
+ *
+ * 注意：**不要淘汰还没加载完的图**。它身上挂着 `onReady` 回调，
+ * 删掉它就等于让那次重绘请求永远收不到通知 —— 画面会停在首帧，
+ * 用户以为图片坏了。所以先从最老的开始找，跳过未完成的。
+ */
+function cacheImage(dataUrl: string, image: HTMLImageElement): void {
+  imageCache.set(dataUrl, image);
+  if (imageCache.size <= IMAGE_CACHE_LIMIT) return;
+
+  for (const [key, value] of imageCache) {
+    if (imageCache.size <= IMAGE_CACHE_LIMIT) break;
+    if (key === dataUrl) continue;
+    /* 还在解码的留着（见上面注释） */
+    if (!(value.complete && value.naturalWidth > 0)) continue;
+    imageCache.delete(key);
+  }
+}
+
+/** 命中时把它挪到队尾（LRU 的"最近使用"） */
+function touchImage(dataUrl: string, image: HTMLImageElement): void {
+  imageCache.delete(dataUrl);
+  imageCache.set(dataUrl, image);
+}
 
 /**
  * 取（或开始加载）一张图片。
@@ -80,6 +123,8 @@ export function loadImage(
   if (typeof Image === 'undefined') return undefined;
   const cached = imageCache.get(dataUrl);
   if (cached) {
+    /* 命中即刷新"最近使用"顺序，否则 LRU 会退化成 FIFO */
+    touchImage(dataUrl, cached);
     if (cached.complete && cached.naturalWidth > 0) return cached;
     // 还在加载：挂上回调，避免重复 new
     if (onReady) cached.addEventListener('load', onReady, { once: true });
@@ -89,7 +134,7 @@ export function loadImage(
   image.decoding = 'async';
   if (onReady) image.addEventListener('load', onReady, { once: true });
   image.src = dataUrl;
-  imageCache.set(dataUrl, image);
+  cacheImage(dataUrl, image);
   return image;
 }
 
