@@ -17,6 +17,7 @@ import { forkSessionAt, parseResumeParams } from '@/sandbox/replay/resume';
 import { SandRendererSwitch } from '@/sandbox/render';
 import { symbolLabel } from '@/sandbox/symbols';
 import { SymbolTray } from '@/sandbox/library/SymbolTray';
+import { toggleFavorite } from '@/sandbox/library/search';
 import { usePackImageMap } from '@/sandbox/library';
 import { Toolbar } from '@/sandbox/workbench/Toolbar';
 import { Inspector } from '@/sandbox/workbench/Inspector';
@@ -49,6 +50,12 @@ import '@/styles/sandbox-workbench.css';
  * （改了一个忘了另一个），而且字形 `🪮` 这类 emoji 在不同字体下渲染不一致，
  * 只该有一个地方说了算。
  */
+
+/**
+ * 稳定空收藏。写成 `prefs.favoriteSymbols ?? []` 会让每次渲染都产生
+ * 新数组，`SymbolTray` 里依赖 `favorites` 的 `useMemo` 全部失效。
+ */
+const EMPTY_FAVORITES: readonly string[] = [];
 
 export default function SandboxPage() {
   const { t } = useI18n();
@@ -239,6 +246,23 @@ export default function SandboxPage() {
   const handleOutlineModeChange = useCallback((enabled: boolean) => {
     setPreferences({ outlineMode: enabled });
   }, []);
+
+  /**
+   * 收藏沙具。
+   *
+   * 收藏存在偏好里而不是会话里：它是**跨会话的检索习惯**，
+   * 每次开新沙盘都要重新收一遍就失去意义了。
+   *
+   * 上限与去重逻辑都在 `toggleFavorite` 里（纯函数，有单测），
+   * 这里只负责把结果写回偏好。
+   */
+  const favorites = prefs.favoriteSymbols ?? EMPTY_FAVORITES;
+  const handleToggleFavorite = useCallback(
+    (symbolId: string) => {
+      setPreferences({ favoriteSymbols: toggleFavorite(favorites, symbolId) });
+    },
+    [favorites],
+  );
 
   /**
    * 年龄门（CONTRACT §7.7）。
@@ -456,6 +480,8 @@ export default function SandboxPage() {
               onPick={handleAddSymbol}
               value={selectedId}
               disabled={api.locked}
+              favorites={favorites}
+              onToggleFavorite={handleToggleFavorite}
             />
           </Card>
 

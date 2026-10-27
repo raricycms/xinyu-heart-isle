@@ -261,6 +261,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   retentionDays: 0,
   locale: 'zh-CN',
   outlineMode: false,
+  favoriteSymbols: [],
 };
 
 /**

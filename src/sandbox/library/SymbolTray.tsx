@@ -11,7 +11,7 @@ import {
   subcategoryLabels,
   type SymbolCategory,
 } from '@/sandbox/symbols';
-import { filterByCategory, groupBySubcategory, mergeEntries, searchEntries, starterEntries } from './search';
+import { filterByCategory, groupBySubcategory, mergeEntries, resolveFavorites, searchEntries, starterEntries } from './search';
 import { imageForSymbol } from './packs';
 import { usePackImageMap, usePackSymbols, usePacks } from './usePacks';
 import '@/styles/sandbox-library.css';
@@ -43,11 +43,24 @@ export interface SymbolTrayProps {
   includePacks?: boolean;
   /** 长按/右键预览回调；不传则用组件内的小预览条 */
   onPreview?: (symbolId: string) => void;
+  /** 已收藏的沙具 id（受控，默认空） */
+  favorites?: readonly string[];
+  /** 切换收藏；不传则不显示星标按钮（只读场景） */
+  onToggleFavorite?: (symbolId: string) => void;
 }
 
 const LONG_PRESS_MS = 500;
 const SEARCH_DEBOUNCE_MS = 120;
 const STARTER_LIMIT = 24;
+
+/**
+ * 默认空收藏。
+ *
+ * **必须是模块级常量，不能写成 props 默认值 `favorites = []`** ——
+ * 数组字面量每次渲染都是新引用，会让下面所有依赖 `favorites` 的
+ * `useMemo` 全部失效，收藏视图每帧重建。
+ */
+const EMPTY_FAVORITES: readonly string[] = [];
 
 type CategoryTab = SymbolCategory | 'all';
 
@@ -58,6 +71,8 @@ export function SymbolTray({
   className,
   includePacks = true,
   onPreview,
+  favorites = EMPTY_FAVORITES,
+  onToggleFavorite,
 }: SymbolTrayProps) {
   const { t, symbolLabel } = useI18n();
   const packSymbols = usePackSymbols();
@@ -67,6 +82,7 @@ export function SymbolTray({
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [tab, setTab] = useState<CategoryTab>('all');
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [focusIndex, setFocusIndex] = useState(0);
   const [preview, setPreview] = useState<SandboxSymbolEntry | null>(null);
 
@@ -99,7 +115,7 @@ export function SymbolTray({
 
   /* 非搜索态：按大类 / 子类分组（顺带记下每组在扁平列表里的起始下标） */
   const grouped = useMemo(() => {
-    if (searching || tab === 'all') return [];
+    if (searching || tab === 'all' || favoritesOnly) return [];
     const groups = groupBySubcategory(filterByCategory(allEntries, tab));
     let offset = 0;
     return groups.map((group) => {
@@ -107,19 +123,32 @@ export function SymbolTray({
       offset += group.items.length;
       return { ...group, start };
     });
-  }, [allEntries, searching, tab]);
+  }, [allEntries, favoritesOnly, searching, tab]);
 
   const starter = useMemo(() => {
-    if (searching || tab !== 'all') return [];
+    if (searching || tab !== 'all' || favoritesOnly) return [];
     return starterEntries(allEntries, STARTER_LIMIT);
-  }, [allEntries, searching, tab]);
+  }, [allEntries, favoritesOnly, searching, tab]);
+
+  /**
+   * 收藏视图。
+   *
+   * 收藏是 v1.1 交付物「搜索/收藏」里一直没做的那一半：搜索从 v1.1
+   * 就在，收藏一直没有入口。把它做成与「大类」「搜索」并列的第三种
+   * 筛选态，而不是塞进搜索框的语法糖 —— 否则用户得先知道语法。
+   */
+  const favoriteItems = useMemo(
+    () => resolveFavorites(allEntries, favorites),
+    [allEntries, favorites],
+  );
 
   /** 当前网格的扁平顺序（键盘导航用，与渲染顺序一致） */
   const flat = useMemo(() => {
+    if (favoritesOnly) return favoriteItems;
     if (searching) return searchResult;
     if (tab === 'all') return starter;
     return grouped.flatMap((group) => group.items);
-  }, [grouped, searchResult, searching, starter, tab]);
+  }, [favoriteItems, favoritesOnly, grouped, searchResult, searching, starter, tab]);
 
   /* 列表变化时把焦点索引夹住，避免越界后按方向键没反应 */
   useEffect(() => {
@@ -141,6 +170,25 @@ export function SymbolTray({
   }, []);
 
   useEffect(() => clearLongPress, [clearLongPress]);
+
+  /*
+   * 【为什么这里**不**监听 Escape】
+   *
+   * 我一度在这里加了 window 级 Esc 监听来关闭预览条，理由是「任何浮层
+   * 都要有 Esc」。加完 E2E 立刻挂了，但挂的不是收藏，而是**后面**的
+   * 沙声开关断言。
+   *
+   * 原因：`SandboxPage` 也在 window 上监听 Escape，用来「退出专注模式 /
+   * 取消选中摆件」。两个 window 级监听谁先跑取决于挂载顺序，预览条
+   * 那个还会 stopPropagation —— 于是 E2E 里按一次 Esc 想把预览条关掉，
+   * 结果顺手把沙盘的选中状态也清了，后续断言全乱。
+   *
+   * 结论：**预览条不是模态浮层**，它是嵌在左栏里的行内面板，用户随时
+   * 能看到「关闭」按钮，也有「放入」直接走。为一个行内面板抢全局
+   * Escape，代价是把沙盘的 Esc 语义搅浑 —— 不值。
+   * 如果将来真要做模态版预览，应该走 `<dialog>`，让浏览器自己管
+   * 焦点与 Escape，而不是手搓 window 监听。
+   */
 
   const openPreview = useCallback(
     (entry: SandboxSymbolEntry) => {
@@ -237,6 +285,18 @@ export function SymbolTray({
       const image = packImages[entry.id] ?? imageForSymbol(entry.id, packs);
       const label = symbolLabel(entry.label, entry.labelEn);
       const selected = value === entry.id;
+      /*
+       * 星标为什么不放在卡片右上角：
+       *
+       * 第一版把它做成 44×44 的绝对定位按钮盖在 56px 格子上，并用
+       * clip-path 想只留一个小三角可点。结果 E2E 立刻红了 ——
+       * 「点选沙具后摆件数 +1」失败，因为剪裁只影响**绘制**，
+       * 元素的可点区域仍是 44×44，把格子中心全吃了。
+       *
+       * 网格格子只有 56px，塞不下第二个 44px 触摸目标（a11y 硬要求）。
+       * 所以收藏入口移到**预览条**（长按/右键唤出），那里空间足够，
+       * 而且「先看清楚再决定收不收」也更符合收藏的语义。
+       */
       return (
         <button
           key={entry.id}
@@ -307,6 +367,25 @@ export function SymbolTray({
         </span>
       </div>
 
+      {/* ------------------------------- 收藏筛选 ------------------------------- */}
+      <div className="lib__filters">
+        <button
+          type="button"
+          className={cx('lib__favfilter', favoritesOnly && 'is-active')}
+          aria-pressed={favoritesOnly}
+          disabled={disabled}
+          data-testid="sandbox-favorites-toggle"
+          onClick={() => {
+            setFavoritesOnly((prev) => !prev);
+            setFocusIndex(0);
+          }}
+        >
+          <span aria-hidden>★</span>
+          {t('sandbox.favorites')}
+          <span className="mono">{favorites.length}</span>
+        </button>
+      </div>
+
       {/* ------------------------------- 大类 tabs ------------------------------ */}
       <div className="lib__tabs" role="tablist" aria-label={t('sandbox.library')}>
         {(() => {
@@ -343,7 +422,11 @@ export function SymbolTray({
         onKeyDown={handleGridKeyDown}
       >
         {flat.length === 0 ? (
-          <p className="lib__empty small muted">{t('sandbox.libraryEmpty')}</p>
+          <p className="lib__empty small muted">
+            {favoritesOnly ? t('sandbox.favoritesEmpty') : t('sandbox.libraryEmpty')}
+          </p>
+        ) : favoritesOnly ? (
+          <div className="lib__grid">{favoriteItems.map((entry, index) => renderItem(entry, index))}</div>
         ) : searching ? (
           <div className="lib__grid">{searchResult.map((entry, index) => renderItem(entry, index))}</div>
         ) : tab === 'all' ? (
@@ -394,6 +477,21 @@ export function SymbolTray({
             >
               放入
             </button>
+            {onToggleFavorite ? (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                aria-pressed={favorites.includes(preview.id)}
+                data-testid="lib-fav"
+                data-symbol-id={preview.id}
+                onClick={() => onToggleFavorite(preview.id)}
+              >
+                <span aria-hidden>{favorites.includes(preview.id) ? '★' : '☆'}</span>
+                {favorites.includes(preview.id)
+                  ? t('sandbox.favoritesRemove')
+                  : t('sandbox.favoritesAdd')}
+              </button>
+            ) : null}
             <button type="button" className="btn btn--ghost btn--sm" onClick={() => setPreview(null)}>
               {t('common.close')}
             </button>

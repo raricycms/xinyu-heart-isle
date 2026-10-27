@@ -194,3 +194,47 @@ export function starterEntries(
   }
   return picked;
 }
+
+/* -------------------------------------------------------------------------- */
+/*                                   收藏                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 收藏上限。
+ *
+ * 为什么要有上限：`favoriteSymbols` 落在 localStorage，而收藏动作是
+ * 一星一次、没有撤销成本，很容易被手滑刷到几千条。localStorage 的
+ * 配额是 5MB 量级，写失败会**静默丢整份偏好**（见 `storage.ts` 的
+ * 配额注释）。所以这里先兜住：满了就丢弃最早的一条。
+ *
+ * 200 这个数字来自实际使用：327 件沙具里，一个人真正反复用的大多
+ * 在几十件以内；200 留了足够余量，又远小于会危害配额的量级。
+ */
+export const MAX_FAVORITES = 200;
+
+/**
+ * 切换收藏。返回**新数组**，不改入参 —— `useSyncExternalStore` 依赖
+ * 引用变化来判定更新，原地 push 会导致 UI 不重渲染。
+ *
+ * 满额时丢弃最早收藏的那条（数组头部），保证新收藏一定进得去 ——
+ * 用户点星标时期待的是「加进去」，不是「加不进去」。
+ */
+export function toggleFavorite(favorites: readonly string[], id: string): string[] {
+  if (favorites.includes(id)) return favorites.filter((entry) => entry !== id);
+  const next = [...favorites, id];
+  return next.length > MAX_FAVORITES ? next.slice(next.length - MAX_FAVORITES) : next;
+}
+
+/**
+ * 把收藏 id 映射回条目，并**丢弃已经不存在的 id**（沙具包被卸载、
+ * 内置库改名都会造成悬空 id）。顺序保持收藏顺序。
+ */
+export function resolveFavorites(
+  entries: readonly SandboxSymbolEntry[],
+  favorites: readonly string[],
+): SandboxSymbolEntry[] {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  return favorites
+    .map((id) => byId.get(id))
+    .filter((entry): entry is SandboxSymbolEntry => entry !== undefined);
+}

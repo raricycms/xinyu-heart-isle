@@ -78,6 +78,10 @@ export const zhCN: Record<string, string> = {
   'sandbox.libraryEmpty': '没有找到匹配的沙具，换个词试试。',
   'sandbox.libraryAll': '全部',
   'sandbox.libraryCount': '{count} 件',
+  'sandbox.favorites': '收藏',
+  'sandbox.favoritesAdd': '收藏',
+  'sandbox.favoritesRemove': '已收藏',
+  'sandbox.favoritesEmpty': '还没有收藏。长按或右键沙具，在预览条里点「收藏」。',
   'sandbox.libraryImportPack': '导入沙具包',
 
   /* -------------------------------- 场景主题 ------------------------------- */

@@ -696,6 +696,130 @@ const scenarios: Scenario[] = [
       expectTrue('脏标记为 1', dirty.trim() === '1', `实际 "${dirty}"`);
 
       /*
+       * 沙具收藏（v1.1「搜索/收藏」里一直缺的那一半）。
+       *
+       * 【入口位置的诚实说明】
+       * 收藏按钮在长按/右键唤出的预览条里，不在沙具卡片上。
+       * 第一版做成卡片右上角的 44×44 星标，E2E 立刻红了：
+       * clip-path 只裁绘制、不裁命中区域，那个 44px 方块把 56px 格子的
+       * 中心全吃了，点沙具再也摆不进去。网格里塞不下第二个 44px 触摸
+       * 目标（a11y 硬要求），所以入口移到预览条：空间足够，而且
+       * 「先看清楚再决定收不收」更合收藏的语义。
+       *
+       * 【这段测试必须自己收拾干净】
+       * 它的三次点击（右键唤出、收藏、收藏筛选）会把页面滚到 450px，
+       * 于是后面「沙声开关」的按钮跑到 sticky 导航条底下，点击被
+       * a.site-nav__link 接走 —— 表现为「点了开关但 aria-pressed 没变」。
+       * 所以结尾必须 `scrollTo(0,0)` 复位。这一条是实测出来的：
+       * elementFromPoint 打到 box y=11、scrollY=450，一目了然。
+       */
+      {
+        const firstCard = await page.$('[data-testid="lib-item"]');
+        if (!firstCard) {
+          fail('沙具卡片存在', '找不到 lib-item');
+        } else {
+          await firstCard.click({ button: 'right' });
+          await new Promise((resolve) => setTimeout(resolve, 300));
+
+          const favBtn = await page.$('[data-testid="lib-fav"]');
+          expectTrue('预览条里有收藏按钮', favBtn !== null, favBtn ? '找到了' : '没找到');
+
+          if (favBtn) {
+            const favSymbolId = await favBtn.evaluate((node) =>
+              node.getAttribute('data-symbol-id'),
+            );
+            const pressedBefore = await favBtn.evaluate((node) =>
+              node.getAttribute('aria-pressed'),
+            );
+            expectTrue(
+              '初始状态是未收藏',
+              pressedBefore === 'false',
+              `aria-pressed="${pressedBefore}"`,
+            );
+
+            await favBtn.click();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+
+            const pressedAfter = await page.$eval(
+              '[data-testid="lib-fav"]',
+              (node) => node.getAttribute('aria-pressed'),
+            );
+            expectTrue(
+              '点收藏后 aria-pressed 变 true',
+              pressedAfter === 'true',
+              `aria-pressed="${pressedAfter}"`,
+            );
+
+            /*
+             * 真正重要的那条：收藏必须真的写进 localStorage。
+             * 只改 useState 的假实现能过上面两条，但过不了这条。
+             */
+            const stored = await page.evaluate(() => {
+              for (let i = 0; i < localStorage.length; i += 1) {
+                const key = localStorage.key(i);
+                if (!key || !key.includes('preferences')) continue;
+                const raw = localStorage.getItem(key) ?? '';
+                if (raw.includes('favoriteSymbols')) return raw;
+              }
+              return null;
+            });
+            expectTrue(
+              '收藏写进了 localStorage 的偏好（不是只存在组件 state）',
+              stored !== null && stored.includes(favSymbolId ?? '__none__'),
+              stored
+                ? `命中 ${favSymbolId}`
+                : 'localStorage 里找不到 favoriteSymbols',
+            );
+
+            // 收藏筛选视图里应当能看到这件沙具
+            await page.click('[data-testid="sandbox-favorites-toggle"]');
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            const inFavView = await page.$$eval('[data-testid="lib-item"]', (nodes) => nodes.length);
+            expectTrue(
+              '收藏视图里至少能看到 1 件',
+              inFavView >= 1,
+              `看到 ${inFavView} 件（收藏的是 ${favSymbolId}）`,
+            );
+
+            // 还原：退出收藏视图 + 取消收藏
+            await page.click('[data-testid="sandbox-favorites-toggle"]');
+            await new Promise((resolve) => setTimeout(resolve, 250));
+
+            // 取消收藏：重新右键唤出预览条，点一次收藏按钮切回未收藏
+            const cardAgain = await page.$('[data-testid="lib-item"]');
+            if (cardAgain) {
+              await cardAgain.click({ button: 'right' });
+              await new Promise((resolve) => setTimeout(resolve, 300));
+              const undoBtn = await page.$('[data-testid="lib-fav"]');
+              if (undoBtn) {
+                const pressed = await undoBtn.evaluate((node) =>
+                  node.getAttribute('aria-pressed'),
+                );
+                if (pressed === 'true') {
+                  await undoBtn.click();
+                  await new Promise((resolve) => setTimeout(resolve, 250));
+                }
+              }
+              // 收起预览条：点它自己的「关闭」按钮（不按 Escape，
+              // 沙盘页面也用 Escape 做取消选中，两者会打架）
+              const closeBtn = await page.$('.lib__preview-actions button:last-child');
+              if (closeBtn) await closeBtn.click();
+              await new Promise((resolve) => setTimeout(resolve, 200));
+            }
+          }
+        }
+
+        /*
+         * 复位页面滚动。
+         * 上面的点击会把整页滚到 450px，把工作台工具栏顶到 sticky
+         * 导航条底下 —— 后面的沙声开关就点不到了（点击被导航链接接走）。
+         * 这是本段测试自己制造的副作用，必须自己清理。
+         */
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+
+      /*
        * 沙声开关（VISION §5.1 P0）。
        *
        * 这条断言的来历：`Preferences.soundEnabled` 曾经是个**死开关** ——

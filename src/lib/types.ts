@@ -373,6 +373,14 @@ export interface Preferences {
   locale?: 'zh-CN' | 'en';
   /** 是否开启轮廓模式（色盲/对比度辅助） */
   outlineMode?: boolean;
+  /**
+   * 收藏的沙具 id（v1.1「搜索/收藏」里的收藏）。
+   *
+   * 只存 id，不存顺序以外的任何东西 —— 收藏是**检索辅助**，
+   * 不是「这个沙具意味着什么」的判断，因此这里不做任何语义归类。
+   * 上限由 `toggleFavorite` 控制，避免 localStorage 被灌爆。
+   */
+  favoriteSymbols?: string[];
 }
 
 /* -------------------------------------------------------------------------- */

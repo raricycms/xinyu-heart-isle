@@ -708,11 +708,23 @@
   color: var(--c-accent);
   font-size: var(--fs-xs);
   cursor: pointer;
-  /* 44px：CONTRACT §7 触摸目标（原 min-height 32px）。引导语卡片的「换一组」，
-     是这一栏唯一的文字按钮，抬到 44 也顺便让它看起来更像可点的。 */
+  /*
+   * 44px：CONTRACT §7 触摸目标（原 min-height 32px）。
+   *
+   * 这里踩过一个只补了一半的坑：当初只加了 `min-height: 44px`，
+   * 高度够了但宽度还是由文字撑开。中文「换一组」4 个字在 11.5px 下
+   * 只有 42.5px —— 差 1.5px 不达标，移动端 a11y 每次报
+   * `button(43×44)「换一组」`。触摸目标是 **44×44 两个方向**，
+   * 只写 min-height 等于只做了一半。
+   *
+   * 同时用 justify-content: center 让文字在补宽后仍然居中，
+   * 并加 min-width 保证任何语言的短标签都不会小于 44。
+   */
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 44px;
+  min-width: 44px;
   padding: var(--sp-1);
   border-radius: var(--r-sm);
 }

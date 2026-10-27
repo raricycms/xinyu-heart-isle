@@ -24,12 +24,15 @@ import {
   type PromptStage,
 } from '@/sandbox/symbols';
 import {
+  MAX_FAVORITES,
   filterByCategory,
   groupBySubcategory,
   mergeEntries,
+  resolveFavorites,
   searchEntries,
   starterEntries,
   subcategoriesOf,
+  toggleFavorite,
 } from './search';
 import { promptPoolSize, promptsForView, PROMPT_STAGES, nextSeed } from './prompts';
 import {
@@ -172,6 +175,61 @@ describe('沙具检索', () => {
     const upper = searchEntries(SYMBOLS, 'DRAGON', 20).map((entry) => entry.id);
     expect(upper).toEqual(lower);
     expect(lower.length).toBeGreaterThan(0);
+  });
+});
+
+describe('收藏（v1.1「搜索/收藏」里一直缺的那一半）', () => {
+  it('toggleFavorite 加进去、再点去掉', () => {
+    const added = toggleFavorite([], 'mountain');
+    expect(added).toEqual(['mountain']);
+    expect(toggleFavorite(added, 'mountain')).toEqual([]);
+  });
+
+  it('不修改入参（useSyncExternalStore 靠引用变化重渲染）', () => {
+    const original = ['mountain'];
+    const next = toggleFavorite(original, 'volcano');
+    expect(original).toEqual(['mountain']);
+    expect(next).not.toBe(original);
+  });
+
+  it('收藏顺序 = 加入顺序（最近收的在最后，方便「越收越顺手」）', () => {
+    let favs: string[] = [];
+    for (const id of ['mountain', 'volcano', 'desert']) favs = toggleFavorite(favs, id);
+    expect(favs).toEqual(['mountain', 'volcano', 'desert']);
+  });
+
+  it('超过上限时丢最早的一条，新的一定进得去', () => {
+    let favs: string[] = [];
+    for (let i = 0; i < MAX_FAVORITES; i += 1) favs = toggleFavorite(favs, `id-${i}`);
+    expect(favs).toHaveLength(MAX_FAVORITES);
+
+    favs = toggleFavorite(favs, 'newest');
+    expect(favs).toHaveLength(MAX_FAVORITES);
+    expect(favs).toContain('newest');
+    // 最早那条被挤掉了
+    expect(favs).not.toContain('id-0');
+  });
+
+  it('取消收藏在满额时也要能生效（不能被上限逻辑吃掉）', () => {
+    let favs: string[] = [];
+    for (let i = 0; i < MAX_FAVORITES; i += 1) favs = toggleFavorite(favs, `id-${i}`);
+    favs = toggleFavorite(favs, 'id-5');
+    expect(favs).toHaveLength(MAX_FAVORITES - 1);
+    expect(favs).not.toContain('id-5');
+  });
+
+  it('resolveFavorites 按收藏顺序返回条目', () => {
+    const resolved = resolveFavorites(SYMBOLS, ['volcano', 'mountain']);
+    expect(resolved.map((entry) => entry.id)).toEqual(['volcano', 'mountain']);
+  });
+
+  it('resolveFavorites 丢弃悬空 id（沙具包卸载 / 内置库改名）', () => {
+    const resolved = resolveFavorites(SYMBOLS, ['mountain', 'this-id-is-gone', 'volcano']);
+    expect(resolved.map((entry) => entry.id)).toEqual(['mountain', 'volcano']);
+  });
+
+  it('空收藏返回空数组，不抛错', () => {
+    expect(resolveFavorites(SYMBOLS, [])).toEqual([]);
   });
 });
 

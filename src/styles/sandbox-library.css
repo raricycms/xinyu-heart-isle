@@ -92,6 +92,53 @@
   max-height: 46vh;
 }
 
+/* -------------------------------------------------------------------------- */
+/*                              收藏（v1.1 补齐）                             */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * 收藏筛选行。
+ *
+ * 用 aria-pressed 而不是 role=tab：它不是「切换视图」而是「在当前视图上
+ * 叠加一个筛选」，两者可以同时生效（比如在某个大类里只看收藏）。
+ */
+.lib__filters {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 2px var(--sp-2);
+}
+
+.lib__favfilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 4px var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--ink-500);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.lib__favfilter:hover:not(:disabled) {
+  border-color: var(--teal-500);
+  color: var(--ink-700);
+}
+
+.lib__favfilter.is-active {
+  border-color: var(--teal-500);
+  background: var(--teal-100);
+  color: var(--ink-900);
+}
+
+.lib__favfilter:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .lib__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
@@ -643,5 +690,17 @@
 
   .prompt-panel__refresh {
     width: 100%;
+    /*
+     * 移动端 a11y 门禁实测这条按钮是 43×44 —— 正好差 1px 被判红。
+     *
+     * 根因不是 min-height（那条早就有），而是 `.prompt-panel__head` 在
+     * 窄屏下改成 `align-items: stretch` 后，这个按钮分到的可用宽度
+     * 只剩 43px，`width: 100%` 于是老老实实变成 43px。文本能换行，
+     * 所以高度够、宽度不够。
+     *
+     * 触摸目标 ≥44×44 是硬要求（WCAG 2.5.5，项目 a11y 门禁零容忍），
+     * 1px 的差距靠「应该够了吧」守不住 —— 只有 min-width 能钉住它。
+     */
+    min-width: 44px;
   }
 }

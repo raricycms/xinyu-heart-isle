@@ -67,6 +67,10 @@ export const en: Record<string, string> = {
   'sandbox.libraryEmpty': 'Nothing matched. Try another word.',
   'sandbox.libraryAll': 'All',
   'sandbox.libraryCount': '{count} figures',
+  'sandbox.favorites': 'Favorites',
+  'sandbox.favoritesAdd': 'Favorite',
+  'sandbox.favoritesRemove': 'Favorited',
+  'sandbox.favoritesEmpty': 'No favorites yet. Long-press or right-click a figure, then tap Favorite.',
   'sandbox.libraryImportPack': 'Import a figure pack',
 
   'sandbox.scene': 'Scene',
