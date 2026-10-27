@@ -32,6 +32,18 @@ export const zhCN: Record<string, string> = {
   'sandbox.newSession': '新建沙盘',
   'sandbox.confirmDiscard': '当前沙盘还没保存，确定要离开吗？',
   'sandbox.emptyTray': '沙盘还是空的。从下面挑一个放进来，或者先用手推一推沙。',
+  /*
+   * 年龄门（CONTRACT §7.7：`acknowledgedAge` 未通过时，沙盘页需显示监护人提示）。
+   * 文案刻意不提「禁止」「不得」——不吓人、不诊断，只说明一件事：
+   * 未满 18 岁建议在监护人知情的情况下使用。
+   */
+  'sandbox.ageGate.title': '使用前请确认',
+  'sandbox.ageGate.body':
+    '心屿是自我了解的辅助工具，不提供诊断或治疗。如果你未满 18 岁，建议在监护人知情的情况下使用。',
+  'sandbox.ageGate.adult': '我已满 18 岁',
+  'sandbox.ageGate.minor': '我未满 18 岁，会和监护人一起用',
+  'sandbox.ageGate.hint': '这个选择只存在你自己的设备上，不会上传。',
+  'sandbox.ageGate.minorHint': '好的。需要时可以随时回到「危机与求助」看看。',
   'sandbox.itemCount': '已放 {count} 件',
   'sandbox.surfaceHint': '拖动笔刷在沙面上推、挖、抹。松手才算一笔。',
   'sandbox.selectFirst': '先选中一个摆件',

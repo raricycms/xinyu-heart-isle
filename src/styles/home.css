@@ -323,6 +323,83 @@
   line-height: 1.8;
 }
 
+/* ------------------------- 首次知情同意（VISION §5.6） ------------------------- */
+
+/*
+ * 刻意做成一条「带底色的提示条」，而不是弹出层：
+ * 弹出层会盖住页面，也会挡住通往 /safety 的路（红线 §11.3）。
+ * 用左侧竖线而不是重色块，避免在情绪脆弱的人面前显得像警告。
+ */
+.consent-band {
+  border-left: 3px solid var(--c-accent);
+  background: var(--c-surface-2);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-4);
+  border-radius: var(--r-md);
+}
+
+.consent-band__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.consent-band__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+.consent-band__text {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.8;
+  color: var(--c-ink-soft);
+}
+
+.consent-band__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.consent-band__link {
+  /*
+   * 触摸目标必须 ≥44×44（CONTRACT §7）。
+   * 第一版把它写成一句裸文字链接，实测 182×22.1px，a11y 审计直接报 critical ——
+   * 一行 14px 行高的文字永远到不了 44px 高。所以这里做成「胶囊按钮」的形状：
+   * 有 padding、有圆角、有边框，既是合格目标，视觉上也清楚它是可点的第二条路。
+   */
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-full);
+  border: 1px solid var(--c-line);
+  font-size: 0.8125rem;
+  color: var(--c-ink-soft);
+  text-decoration: none;
+}
+
+.consent-band__link:hover {
+  color: var(--c-ink);
+  border-color: var(--c-ink-faint);
+}
+
+@media (max-width: 640px) {
+  .consent-band {
+    padding: var(--sp-3);
+  }
+
+  /* 手机上按钮与链接竖排：两个都是可点的目标，别挤在一起误触 */
+  .consent-band__actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 /* -------------------------------- 记录页 -------------------------------- */
 
 .records-stats {

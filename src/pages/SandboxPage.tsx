@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Notice } from '@/components/ui/Primitives';
 import { useToast } from '@/lib/toast';
@@ -81,6 +82,22 @@ export default function SandboxPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [renderer, setRenderer] = useState<RendererKind>(prefs?.renderer ?? 'iso2d');
+
+  /*
+   * 切换渲染器时**写回偏好**。
+   *
+   * 之前 `onRendererChange={setRenderer}` 直接给 useState 的 setter，
+   * 只改本地 state —— 而 `Preferences.renderer` 的注释写着「默认渲染器」，
+   * 用户切到 DOM 2D（低端机/无障碍场景）后一刷新就弹回 2.5D。
+   * 幽灵字段检测器把「renderer 无人写入」报了出来，就是这里。
+   *
+   * 本地 state 仍然保留：切换要立即生效（不等偏好订阅回流），
+   * 偏好则负责跨会话记住。
+   */
+  const handleRendererChange = useCallback((next: RendererKind) => {
+    setRenderer(next);
+    setPreferences({ renderer: next });
+  }, []);
   /** 专注模式：只留沙盘（不属于持久化偏好） */
   const [focusMode, setFocusMode] = useState(false);
   const [tool, setTool] = useState<SurfaceTool | null>(null);
@@ -206,7 +223,53 @@ export default function SandboxPage() {
     setPreferences({ soundEnabled: enabled });
   }, []);
 
-  const handleItemDrag = useCallback(    (id: string, x: number, y: number) => {
+  /*
+   * 两个无障碍开关的写入入口。
+   *
+   * 这两个字段此前是「只读不写」的幽灵：`App.tsx` 会读 `reducedMotion`
+   * 去写 `html[data-reduced-motion]`，`dom2d`/`iso2d` 会读 `outlineMode`
+   * 去画轮廓，呼吸练习也会读 `reducedMotion` —— 全都实现了，
+   * 但**没有任何 UI 能写入它们**，所以用户永远打不开。
+   * 幽灵字段检测器（`scripts/audit/ghost-fields.mjs`）抓的就是这种。
+   */
+  const handleReducedMotionChange = useCallback((enabled: boolean) => {
+    setPreferences({ reducedMotion: enabled });
+  }, []);
+
+  const handleOutlineModeChange = useCallback((enabled: boolean) => {
+    setPreferences({ outlineMode: enabled });
+  }, []);
+
+  /**
+   * 年龄门（CONTRACT §7.7）。
+   *
+   * 「未通过」要能区分出**三种**状态，不能只用一个 boolean 搪塞：
+   * - 从没选过（`undefined`）→ 显示提示，两个按钮都要有；
+   * - 选了「已满 18」→ 不再显示；
+   * - 选了「未满 18，会和监护人一起用」→ **也不该再显示**。
+   *
+   * 最后一档容易写错：很多人会实现成「只有成年人才能关闭提示」，
+   * 那等于未成年人在页面上永远顶着一块提示牌，而他并没有做错任何事。
+   * 未成年人选了「会和监护人一起用」就是一种有效确认。
+   *
+   * 这个选择只写 localStorage，不上传（红线 §5.6 / CONTRACT §5.4）。
+   */
+  const [ageGateAnswered, setAgeGateAnswered] = useState(false);
+  const showAgeGate = prefs?.acknowledgedAge === undefined || prefs.acknowledgedAge === false
+    ? !ageGateAnswered
+    : false;
+
+  const handleAgeGateConfirm = useCallback((isAdult: boolean) => {
+    setPreferences({ acknowledgedAge: true });
+    setAgeGateAnswered(true);
+    if (!isAdult) {
+      // 未成年人不是「降级使用」，只是把监护人知情这件事说清楚
+      show(t('sandbox.ageGate.minorHint'), 'info');
+    }
+  }, [show, t]);
+
+  const handleItemDrag = useCallback(
+    (id: string, x: number, y: number) => {
       api.moveItem(id, clamp(x, 0, 1), clamp(y, 0, 1));
     },
     [api],
@@ -312,6 +375,32 @@ export default function SandboxPage() {
 
   return (
     <div className={`wb${focusMode ? ' wb--focus' : ''}`}>
+      {/*
+        年龄门（CONTRACT §7.7）。放在顶栏**之后**、舞台**之前**：
+        顶栏是可以用的（换场景、看历史都不构成风险），
+        但提示必须出现在真正开始摆之前。
+        `role="region"` + `aria-labelledby` 让读屏用户能整块跳过，
+        而不是被三行说明卡住。
+      */}
+      {showAgeGate ? (
+        <div className="wb-agegate" role="region" aria-labelledby="agegate-title" data-testid="sandbox-age-gate">
+          <div className="wb-agegate__inner">
+            <h2 className="wb-agegate__title" id="agegate-title">
+              {t('sandbox.ageGate.title')}
+            </h2>
+            <p className="wb-agegate__body">{t('sandbox.ageGate.body')}</p>
+            <div className="wb-agegate__actions">
+              <Button size="sm" variant="primary" onClick={() => handleAgeGateConfirm(true)} data-testid="agegate-adult">
+                {t('sandbox.ageGate.adult')}
+              </Button>
+              <Button size="sm" variant="quiet" onClick={() => handleAgeGateConfirm(false)} data-testid="agegate-minor">
+                {t('sandbox.ageGate.minor')}
+              </Button>
+            </div>
+            <p className="wb-agegate__hint">{t('sandbox.ageGate.hint')}</p>
+          </div>
+        </div>
+      ) : null}
       <Toolbar
         title={api.title}
         onTitleChange={api.setTitle}
@@ -320,7 +409,7 @@ export default function SandboxPage() {
         sceneId={api.state.sceneId}
         onSceneChange={handleSceneChange}
         renderer={renderer}
-        onRendererChange={setRenderer}
+        onRendererChange={handleRendererChange}
         dirty={api.dirty}
         locked={api.locked}
         canUndo={api.canUndo}
@@ -333,6 +422,10 @@ export default function SandboxPage() {
         sessionCount={sessions.length}
         soundEnabled={prefs?.soundEnabled ?? true}
         onSoundEnabledChange={handleSoundEnabledChange}
+        reducedMotion={prefs?.reducedMotion ?? false}
+        onReducedMotionChange={handleReducedMotionChange}
+        outlineMode={prefs?.outlineMode ?? false}
+        onOutlineModeChange={handleOutlineModeChange}
       />
 
       {/*

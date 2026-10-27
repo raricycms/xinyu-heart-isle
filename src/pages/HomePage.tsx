@@ -5,6 +5,7 @@ import { Card, SectionHead } from '@/components/ui/Card';
 import { Empty, Notice, Stat } from '@/components/ui/Primitives';
 import {
   moodStore,
+  setPreferences,
   STORAGE_KEYS,
   useCollection,
   usePreferences,
@@ -53,6 +54,25 @@ export default function HomePage() {
   const journals = useCollection<JournalEntry>(STORAGE_KEYS.journal);
   const preferences = usePreferences();
   const { show } = useToast();
+
+  /**
+   * 首次进入的知情同意（VISION §5.6）。
+   *
+   * `Preferences.acknowledgedDisclaimer` 之前是个**死开关** —— 字段在、
+   * 默认 false、注释写着「是否已确认过首次进入的免责声明」，
+   * 但零处代码读它。首页那条免责声明是常驻文字，不需要用户点任何东西。
+   *
+   * 设计取舍：**不遮挡页面**。用一条可关闭的提示条，而不是全屏弹窗。
+   * 理由是红线 §11.3「不在危机路径上做实验」的近邻——`/safety` 必须永远
+   * 可达；一个全屏弹窗会挡住通往它的路。提示条里直接给出安全页链接。
+   */
+  const [consentDismissed, setConsentDismissed] = useState(false);
+  const showConsent = !preferences.acknowledgedDisclaimer && !consentDismissed;
+
+  const handleAcceptConsent = () => {
+    setPreferences({ acknowledgedDisclaimer: true });
+    setConsentDismissed(true);
+  };
 
   const [mood, setMood] = useState<MoodEntry['mood']>(3);
   const [tags, setTags] = useState<string[]>([]);
@@ -155,6 +175,33 @@ export default function HomePage() {
 
   return (
     <div className="page">
+      {/*
+        首次进入的知情同意（VISION §5.6）。
+        是一条**可关闭的提示条**，不是全屏遮罩 —— 遮罩会挡住通往 /safety
+        的路，而红线 §11.3 要求危机路径永远可达。所以这里把安全页链接
+        直接放进提示条本身。
+      */}
+      {showConsent ? (
+        <section className="consent-band" role="region" aria-labelledby="consent-title" data-testid="consent-band">
+          <div className="consent-band__body">
+            <h2 className="consent-band__title" id="consent-title">
+              开始之前
+            </h2>
+            <p className="consent-band__text">
+              心屿是自我了解与情绪调节的辅助工具，不能替代心理咨询、精神科诊疗或危机干预。
+              你的内容只存在这台设备上，不会上传。
+            </p>
+            <div className="consent-band__actions">
+              <Button size="sm" variant="primary" onClick={handleAcceptConsent} data-testid="consent-accept">
+                我知道了
+              </Button>
+              <Link to="/safety" className="consent-band__link" data-testid="consent-safety-link">
+                如果你正处在危险中，先看这里
+              </Link>
+            </div>
+          </div>
+        </section>
+      ) : null}
       <section className="hero fade-up">
         <span className="hero__glow" aria-hidden />
         <span className="eyebrow">Xinyu · 心屿</span>
@@ -184,11 +231,14 @@ export default function HomePage() {
         </div>
       </section>
 
-      {preferences.nickname ? (
-        <p className="small muted mb-3">
-          {greeting()}，{preferences.nickname}。
-        </p>
-      ) : null}
+      {/*
+        这里曾经有一个「有昵称才显示」的问候分支：
+          {preferences.nickname ? <p>{greeting()}，{preferences.nickname}。</p> : null}
+        但全仓库**没有任何地方写入过 nickname**（没有设置页，也没有输入框），
+        所以它是一段永远为假的 UI。已连同 `Preferences.nickname` 一起删除。
+        以后真要做昵称，请先有写入入口，再加读取。
+      */}
+      <p className="small muted mb-3">{greeting()}。</p>
 
       <section className="grid grid--2 mb-5">
         <Card>

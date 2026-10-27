@@ -30,6 +30,13 @@ export const en: Record<string, string> = {
   'sandbox.newSession': 'New tray',
   'sandbox.confirmDiscard': 'This tray is not saved yet. Leave anyway?',
   'sandbox.emptyTray': 'The tray is empty. Pick something below, or move the sand with your hand first.',
+  'sandbox.ageGate.title': 'Before you begin',
+  'sandbox.ageGate.body':
+    'Xinyu is a self-understanding aid. It does not diagnose or treat. If you are under 18, please use it with a guardian aware of it.',
+  'sandbox.ageGate.adult': "I'm 18 or older",
+  'sandbox.ageGate.minor': "I'm under 18 and will use it with a guardian",
+  'sandbox.ageGate.hint': 'This choice stays on your device. Nothing is uploaded.',
+  'sandbox.ageGate.minorHint': 'Okay. You can always return to Crisis & Help when you need it.',
   'sandbox.itemCount': '{count} items',
   'sandbox.surfaceHint': 'Drag to push, dig or smooth the sand. One stroke counts when you release.',
   'sandbox.selectFirst': 'Select an item first',

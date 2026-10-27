@@ -38,6 +38,17 @@ jobs:
       - name: 类型检查（脚本）
         run: npx tsc -p tsconfig.scripts.json --noEmit
 
+      # ---- 幽灵字段 ------------------------------------------------------
+      # 每个 Preferences 字段都必须既有读、又有写。
+      # 这条检查值 5 个真实缺陷：soundEnabled / sandboxUiMode /
+      # acknowledgedAge / acknowledgedDisclaimer 全都没实现，
+      # nickname 则是「有读没写」（UI 分支永远为假）。
+      - name: 幽灵字段（每个偏好字段都必须有读有写）
+        run: npm run audit:ghost
+
+      - name: 幽灵字段自检（注入幽灵必须被抓到）
+        run: npm run audit:ghost:self-test
+
       # ---- 构建 ----------------------------------------------------------
       # 必须先于 vitest / E2E / a11y / perf：
       # 体积预算和三个审计脚本都读 dist/。

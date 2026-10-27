@@ -271,6 +271,67 @@ const scenarios: Scenario[] = [
       expectTrue('首屏未加载 three chunk（懒加载生效）', three.length === 0, three.join(', '));
 
       expectTrue('无 console.error', errors.length === 0, errors.join(' | '));
+
+      /*
+       * 首次知情同意（VISION §5.6）。
+       *
+       * `Preferences.acknowledgedDisclaimer` 之前是**死开关**：字段在、
+       * 默认 false、注释写着「是否已确认过首次进入的免责声明」，
+       * 但零处代码读它 —— 首页那条免责声明只是常驻文字。
+       *
+       * 断言五件事，重点是第 3、4 条：
+       *   1. 首次进来有提示条；
+       *   2. 提示里带 /safety 链接；
+       *   3. 那个链接**真的可点**（`elementFromPoint` 命中它自己）——
+       *      「DOM 里有这个 <a>」和「用户点得到」是两件事，
+       *      遮罩层盖住也能通过前者；
+       *   4. 点了「我知道了」之后**刷新不再出现**（真的写进偏好）；
+       *   5. 提示条不遮挡页面（正文仍在）。
+       */
+      const consent = await page.$('[data-testid="consent-band"]');
+      if (consent) {
+        expectTrue('首次进入显示知情同意条（VISION §5.6）', true, '可见');
+
+        const safetyLink = await page.$('[data-testid="consent-safety-link"]');
+        expectTrue('知情同意条内含 /safety 入口', safetyLink !== null);
+
+        if (safetyLink) {
+          const hitTest = await page.evaluate(`(() => {
+            const a = document.querySelector('[data-testid="consent-safety-link"]');
+            if (!a) return null;
+            const r = a.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return 'zero-size';
+            const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return top === a || a.contains(top) ? 'ok' : 'covered';
+          })()`);
+          expectTrue(
+            '同意条里的 /safety 链接真的可点（未被遮挡）',
+            hitTest === 'ok',
+            `命中结果：${hitTest}`,
+          );
+        }
+
+        // 正文仍在：提示条不是全屏遮罩
+        const bodyStillThere = await bodyLength(page);
+        expectTrue('同意条不遮挡页面正文', bodyStillThere > 100, `正文 ${bodyStillThere} 字`);
+
+        const acceptBtn = await page.$('[data-testid="consent-accept"]');
+        if (acceptBtn) {
+          await acceptBtn.click();
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          const goneNow = await page.$('[data-testid="consent-band"]');
+          expectTrue('点「我知道了」后同意条消失', goneNow === null);
+
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await waitAny(page, ['main', 'h1']);
+          const reappeared = await page.$('[data-testid="consent-band"]');
+          expectTrue('知情同意已持久化（刷新后不再出现）', reappeared === null);
+        } else {
+          fail('同意条有「我知道了」按钮', '找不到 consent-accept');
+        }
+      } else {
+        expectTrue('同意条要么显示要么已被确认', true, '本次运行中已确认过（非首次）');
+      }
     },
   },
 
@@ -465,6 +526,57 @@ const scenarios: Scenario[] = [
         '等待 sandbox-stage',
       );
 
+      /*
+       * 年龄门（CONTRACT §7.7：`acknowledgedAge` 未通过时，沙盘页需显示监护人提示）。
+       *
+       * 这条契约此前**完全没实现** —— 字段定义、默认值、注释都在，
+       * 零处消费。跟 soundEnabled 一样是「字段版幽灵门禁」。
+       *
+       * 断言四件事：
+       *   1. 首次进来必须看得到提示；
+       *   2. 提示**不能锁死**舞台（知情确认 ≠ 拦截）；
+       *   3. 点任一条之后消失；
+       *   4. 刷新后不再出现（真的写进了偏好）。
+       * 第 4 条是关键：只改本地 state 也能满足前 3 条。
+       *
+       * ⚠️ 必须放在本场景**最前面**。第一版插在「摆件 +1」之后，
+       * 而它中间有一次 `page.reload()`，把刚摆的沙具连同脏标记一起冲掉了，
+       * 于是后面的「脏标记为 1」失败。断言之间的顺序依赖是真实的耦合 ——
+       * 任何会 reload 的检查都得在场景开头做完。
+       */
+      const ageGate = await page.$('[data-testid="sandbox-age-gate"]');
+      if (ageGate) {
+        expectTrue('首次进入显示年龄门（CONTRACT §7.7）', true, '提示可见');
+
+        // 有提示时舞台必须仍然可用 —— 否则就是「拦截」而不是「知情确认」
+        const stageUsable = await page.evaluate(
+          `!!document.querySelector('[data-testid="sandbox-stage"]')?.offsetParent`,
+        );
+        expectTrue('年龄门不锁死舞台（知情确认不是拦截）', stageUsable);
+
+        const adultBtn = await page.$('[data-testid="agegate-adult"]');
+        if (adultBtn) {
+          await adultBtn.click();
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          const gone = await page.$('[data-testid="sandbox-age-gate"]');
+          expectTrue('确认后年龄门消失', gone === null);
+
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await withTimeout(
+            page.waitForSelector('[data-testid="sandbox-stage"]', { timeout: STEP_TIMEOUT }),
+            STEP_TIMEOUT + 2000,
+            '等待舞台（年龄门确认后刷新）',
+          );
+          const reappeared = await page.$('[data-testid="sandbox-age-gate"]');
+          expectTrue('年龄门确认状态已持久化（刷新后不再出现）', reappeared === null);
+        } else {
+          fail('年龄门有「已满 18」按钮', '找不到 agegate-adult');
+        }
+      } else {
+        // 说明前面的场景已经确认过了 —— 这本身是可接受的，但要说清楚
+        expectTrue('年龄门要么显示要么已被确认', true, '本次运行中已确认过（非首次）');
+      }
+
       const readCount = async (): Promise<number> => {
         const node = await page.$('[data-testid="sandbox-item-count"]');
         if (!node) return -1;
@@ -552,6 +664,76 @@ const scenarios: Scenario[] = [
         // 还原成开，避免影响后续场景
         await page.click('[data-testid="sandbox-sound-toggle"]');
         await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+
+      /*
+       * 两个无障碍开关：减少动效、轮廓模式。
+       *
+       * 这两个偏好此前是「只读不写」的幽灵：`App.tsx` 会读 reducedMotion
+       * 去写 `html[data-reduced-motion]`，`dom2d`/`iso2d` 会读 outlineMode
+       * 去画轮廓 —— **全都实现了，但没有任何 UI 能写入**。
+       *
+       * 所以断言不打在按钮上，打在**效果**上：
+       *   - 减少动效 → `<html data-reduced-motion="true">` 必须真的出现；
+       *   - 轮廓模式 → 渲染器根节点必须真的挂上 `iso2d--outline`。
+       * 只看 aria-pressed 的话，一个把状态存进 useState 的假实现也能过。
+       */
+      const motionBtn = await page.$('[data-testid="sandbox-reduced-motion-toggle"]');
+      if (!motionBtn) {
+        fail('减少动效开关存在', '找不到 sandbox-reduced-motion-toggle');
+      } else {
+        const before = await motionBtn.evaluate((node) => node.getAttribute('aria-pressed'));
+        await motionBtn.click();
+        await new Promise((resolve) => setTimeout(resolve, 250));
+
+        const dataAttr = await page.evaluate('document.documentElement.dataset.reducedMotion');
+        expectTrue(
+          '减少动效真的作用到 <html data-reduced-motion>',
+          dataAttr === 'true',
+          `实际 "${dataAttr}"（开之前按钮是 ${before}）`,
+        );
+
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await withTimeout(
+          page.waitForSelector('[data-testid="sandbox-reduced-motion-toggle"]', { timeout: STEP_TIMEOUT }),
+          STEP_TIMEOUT + 2000,
+          '等待减少动效开关（刷新后）',
+        );
+        const persistedMotion = await page.$eval(
+          '[data-testid="sandbox-reduced-motion-toggle"]',
+          (node) => node.getAttribute('aria-pressed'),
+        );
+        expectTrue('减少动效偏好已持久化', persistedMotion === 'true', `刷新后 aria-pressed="${persistedMotion}"`);
+
+        // 还原，避免给后续场景（尤其视觉回归）引入动效差异
+        await page.click('[data-testid="sandbox-reduced-motion-toggle"]');
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+
+      const outlineBtn = await page.$('[data-testid="sandbox-outline-toggle"]');
+      if (!outlineBtn) {
+        fail('轮廓模式开关存在', '找不到 sandbox-outline-toggle');
+      } else {
+        const outlineBefore = await page.evaluate(`(() => {
+          const el = document.querySelector('.iso2d, .dom2d');
+          return el ? el.className : null;
+        })()`);
+        await outlineBtn.click();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        const outlineAfter = await page.evaluate(`(() => {
+          const el = document.querySelector('.iso2d, .dom2d');
+          return el ? el.className : null;
+        })()`);
+        expectTrue(
+          '轮廓模式真的作用到渲染器根节点（--outline 类出现）',
+          typeof outlineAfter === 'string' && /--outline\b/.test(outlineAfter),
+          `之前 "${outlineBefore}" → 之后 "${outlineAfter}"`,
+        );
+
+        // 还原
+        await page.click('[data-testid="sandbox-outline-toggle"]');
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
 
       // 撤销可用 -> 点一下 -> 计数回落

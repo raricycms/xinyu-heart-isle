@@ -230,6 +230,12 @@ import { coerceSession, migrateSnapshot } from '@/format/migrate';
    与客观统计（数量、时长、比例）。
 7. **未成年人**：沙盘会话若填写了档案，导出/删除前必须有二次确认；
    `Preferences.acknowledgedAge` 未通过时，沙盘页需显示监护人提示。
+   -*状态（v2.0 追加）*：二次确认早已实现（`window.confirm`）；年龄门此前
+   **只有字段、没有实现**（零处消费），现已补齐：沙盘页顶部提示，
+   「已满 18」与「未满 18，会和监护人一起用」**两条路都能关闭提示**，
+   选择写入 `localStorage`、不上传。定位是**知情确认而不是拦截** ——
+   提示显示时舞台仍然可用，E2E 有专门一条断言钉这个区别
+   （`scripts/e2e/smoke.ts` 沙盘交互场景）。
 8. **数据可带走**：`/records` 与每个会话详情都必须提供 `.sandplay.json` 导出与完整删除入口。
 
 ## 6. 交付要求

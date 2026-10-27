@@ -1154,6 +1154,53 @@
   margin: 0;
 }
 
+/* ------------------------- 年龄门（CONTRACT §7.7） ------------------------ */
+
+/*
+ * 故意做得「像一张卡片」而不是「像一道墙」：
+ * 它是知情确认，不是拦截。所以没有遮罩层、不禁用顶栏，
+ * 也不给「关闭」以外的诱惑（比如把按钮做成小字）。
+ */
+.wb-agegate {
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--c-surface);
+  border-bottom: 1px solid var(--c-line);
+}
+
+.wb-agegate__inner {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.wb-agegate__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+.wb-agegate__body {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: var(--c-ink-soft);
+}
+
+.wb-agegate__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.wb-agegate__hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--c-ink-faint);
+}
+
 /* ------------------------------ 响应式 ---------------------------------- */
 
 
@@ -1181,6 +1228,16 @@
   .wb-bar {
     padding: var(--sp-2);
     gap: var(--sp-2);
+  }
+
+  /* 手机上两个确认按钮竖排且都撑满：拇指够得到，不会误点 */
+  .wb-agegate {
+    padding: var(--sp-3);
+  }
+
+  .wb-agegate__actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .wb-bar__left,

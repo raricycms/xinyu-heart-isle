@@ -356,24 +356,17 @@ export interface JournalEntry extends BaseRecord {
 /** 渲染器选择：DOM 2D（兜底/无障碍）、Canvas 2.5D 轴测（默认）、3D（可选、懒加载） */
 export type RendererKind = 'dom2d' | 'iso2d' | 'three';
 
-/** 沙盘界面模式 */
-export type SandboxUiMode = 'self' | 'counselor';
-
 export interface Preferences {
   /** 是否已确认过首次进入的免责声明 */
   acknowledgedDisclaimer: boolean;
   /** 是否开启减少动效 */
   reducedMotion: boolean;
-  /** 首页展示的昵称，可选 */
-  nickname?: string;
   /** 是否已通过年龄门（未成年人需监护人同意） */
   acknowledgedAge?: boolean;
   /** 沙盘音效开关（沙声/落沙声） */
   soundEnabled?: boolean;
   /** 默认渲染器 */
   renderer?: RendererKind;
-  /** 沙盘界面模式（counselor 默认关闭，需显式开启） */
-  sandboxUiMode?: SandboxUiMode;
   /** 归档保留期（天） */
   retentionDays?: RetentionDays;
   /** 语言 */

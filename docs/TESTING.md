@@ -142,11 +142,11 @@ node --experimental-strip-types --no-warnings scripts/audit/a11y.ts --update-bas
 
 | 场景 | 断言 | 关键点 |
 |---|---|---|
-| 首页 | 6 | 标题含「心屿」、正文 > 100 字、**首屏不加载 three** |
+| 首页 | 8 | 标题含「心屿」、正文 > 100 字、**首屏不加载 three**、知情同意条可关闭且持久化 |
 | 量表列表 | 9 | 5 个量表 slug 逐个查、筛选组有无障碍名 |
 | 量表作答 | 14 | 深链接直开、说明页免责与计分口径、开始作答、键盘 1–4 |
 | 沙盘渲染 | 13 | stage/toolbar/7 个工具/沙具库/canvas、**未加载 three** |
-| 沙盘交互 | 8 | 点沙具计数 +1、脏标记、撤销/重做、事件流增长 |
+| 沙盘交互 | **18** | 点沙具计数 +1、脏标记、撤销/重做、事件流增长、**年龄门**、**沙声开关**、**减少动效 / 轮廓模式真的作用到 DOM** |
 | 沙面工具 | 8 | 7 个工具逐个点击 + 拖动，无 console 错误 |
 | 记录页 | 3 | 渲染 |
 | 安全页 | 5 | `tel:` 链接、12356、号码格式干净 |
@@ -154,6 +154,10 @@ node --experimental-strip-types --no-warnings scripts/audit/a11y.ts --update-bas
 | **键盘全流程** | **12** | 聚焦沙具 → 方向键换格 → Enter 放入 → 方向键移动摆件 → 事件流增长 |
 | 深链接刷新 | 5 | `/sandbox/compare` 刷新后仍渲染、无 4xx 静态资源 |
 | 全路由扫描 | 36 | 16 条路由，**每条都验证不是 404 兜底页** |
+
+> **合计 169 项**。数字别再照着这里抄 —— 跑 `npm run e2e` 看实际值，
+> 这份表的意义是「每个场景守什么」，不是「总数是多少」。
+> 总数已经因为文档滞后错过三次（141 → 153 → 156 → 160 → 169）。
 
 #### 键盘全流程：它抓到的真 bug，tsc 和单测都放行
 
@@ -1165,6 +1169,61 @@ Get-ChildItem src -Recurse -Include *.ts,*.tsx |
 旧 `dist`，所以**看起来绿**。差点把「构建挂了」误读成「断言没抓到」。
 变异测试必须确认构建成功，否则测的是上一个产物。
 
+#### 顺着这条线，把整个 `Preferences` 翻了一遍
+
+一个死开关通常不是孤例。用 `scripts/audit/ghost-fields.mjs`
+（每个字段都必须有读有写）扫下来，`Preferences` 里 **8 个字段有 5 个是幽灵**：
+
+| 字段 | 症状 | 处理 |
+| --- | --- | --- |
+| `soundEnabled` | 0 读 0 写。沙声是 VISION §5.1 的 P0 | **实现**（程序化合成，11 条单测 + E2E） |
+| `acknowledgedAge` | 0 读 0 写。CONTRACT §7.7 明文要求年龄门 | **实现**（沙盘页提示，两条路都能关闭） |
+| `acknowledgedDisclaimer` | 0 读 0 写。VISION §5.6「首次进入确认」 | **实现**（首页可关闭提示条） |
+| `reducedMotion` | 有读无写：`App.tsx` 读它写 `data-reduced-motion`，呼吸练习也读，**但没有入口** | **补 UI**（工作台按钮） |
+| `outlineMode` | 有读无写：`dom2d`/`iso2d` 都会画轮廓，**但没有入口** | **补 UI**（工作台按钮） |
+| `sandboxUiMode` | 0 读 0 写。承诺「记住上次模式」 | **删除**（模式是每会话属性，不是全局偏好） |
+| `nickname` | **有读无写**：`HomePage` 的问候分支永远为假 | **删除**（没有设置页，永远写不进去） |
+| `renderer` | 有读、但只写进 `useState` —— 切换后刷新弹回默认 | **修**（切换时写回偏好） |
+
+`reducedMotion` / `outlineMode` / `renderer` 这三个尤其值得记：
+
+> **「无人写入」和「无人读取」一样致命，但更难发现。**
+>
+> 搜索字段名，你会看到 `App.tsx` 里有、两个渲染器里有、呼吸练习里有 ——
+> 看起来是个活得很好的字段。只有把「读」和「写」分开数，才发现
+> 那一堆全是读：用户**没有任何办法**把它设成 true。功能代码齐全，
+> 入口为零。`nickname` 更隐蔽：唯一的读取点在一个永远走不到的分支里。
+
+#### 检测器自己也是门禁，所以它也需要自检
+
+写这个检测器的过程中，它自己坏过**两次**，两次都是假绿：
+
+1. `collect()` 排除了整个 `src/i18n` 目录，而 `src/i18n/index.ts` 正是
+   `const { locale } = usePreferences()` 所在处 → `locale` 被**误报**成幽灵。
+2. 写入判定接受「任意对象字面量里的 `X: 值`」，于是 `Toolbar.tsx` 的
+   类型声明 `outlineMode: boolean;` 被当成写入 → 把真正的
+   `setPreferences({ outlineMode })` 删掉后，检测器**仍然报绿**。
+
+第 2 类最危险：门禁永远绿，而它守的东西已经坏了。这正是本文件
+§4.7 的主题 —— 检查器必须能证明自己会红。所以有了
+`scripts/audit/ghost-fields-self-test.mjs`：G1 造一个无人读写的字段、
+G2 造一个有读无写的字段、G3 用真实写法验证不误报，三条都必须在副本里跑
+（`tmp/ghost-mut/`，工作区全程只读）。
+
+G3 第一版断言「干净副本必须整棵树没有幽灵」，必然失败 ——
+副本是刻意裁出来的荒地，其余字段当然没人用。断言要打在
+**有意构造的那两个字段**上，否则测的是搭台子的脚手架。
+
+#### 变异验证（本轮）
+
+| 变异 | 结果 |
+| --- | --- |
+| 年龄门确认不写偏好 | E2E 1 红（仅「已持久化」那条，前 3 条仍绿 —— 说明分层正确） |
+| 知情同意写错键（保持 `setPreferences` 被使用） | E2E 2 红 |
+| `outlineMode` 改成写 `locale` | 幽灵检测器 1 红 |
+| `reducedMotion` 改成写 `outlineMode` | E2E 3 红（打在 `<html data-reduced-motion>` 上，不是按钮上） |
+| 删 `setPreferences` 调用（两次） | **`tsc` 先红，E2E 跑旧 dist 假绿** —— 必须换类型合法的变异 |
+
 ---
 
 ## 5. 棘轮基线（a11y）
@@ -1315,6 +1374,10 @@ jobs:
           node --experimental-strip-types --no-warnings scripts/validate-session.ts samples/broken.sandplay.json
           code=$?
           if [ "$code" -eq 1 ]; then echo "✓ 正确拒绝（退出码 1）"; else echo "✗ 退出码 $code，期望 1"; exit 1; fi
+
+      # ---- 幽灵字段（§4.10）----
+      - run: node scripts/audit/ghost-fields.mjs --strict   # 每个偏好字段必须有读有写
+      - run: node scripts/audit/ghost-fields-self-test.mjs  # 检测器自己会红吗
 
       # ---- 真浏览器门禁 ----
       - run: node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts

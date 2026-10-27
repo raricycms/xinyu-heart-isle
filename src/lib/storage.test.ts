@@ -268,7 +268,6 @@ describe('快照引用稳定性（HANDOVER §4.2 白屏事故）', () => {
     expect(prefs.reducedMotion).toBe(true);
     expect(prefs.acknowledgedAge).toBe(false);
     expect(prefs.renderer).toBe('iso2d');
-    expect(prefs.sandboxUiMode).toBe('self');
   });
 
   it('偏好数据损坏时回落到默认值而不是崩溃', async () => {

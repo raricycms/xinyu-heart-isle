@@ -237,13 +237,27 @@ export const legacySandboxStore = sandboxStore;
 /*                                  用户偏好                                   */
 /* -------------------------------------------------------------------------- */
 
+/*
+ * 默认偏好。
+ *
+ * ⚠️ 加字段之前先问一句：**谁会读它？**
+ *
+ * 这里曾经有过三个「死开关」：`acknowledgedDisclaimer`、`acknowledgedAge`、
+ * `sandboxUiMode` —— 字段定义、默认值、注释、i18n 文案全都齐备，
+ * 但零处代码读它们。比「没做」更糟：读代码的人以为功能存在。
+ * 前两个已补齐（年龄门是 CONTRACT §7.7 的要求），`sandboxUiMode` 删掉了 ——
+ * 它承诺的「记住上次的沙盘模式」从来没实现，而这个能力的真实需求
+ * 由 `useSandboxSession({ initialMode })` 显式传入即可，不需要一个
+ * 从不被读的偏好字段。
+ *
+ * 详见 `docs/TESTING.md §4.10「死开关：字段存在 ≠ 功能存在」`。
+ */
 export const DEFAULT_PREFERENCES: Preferences = {
   acknowledgedDisclaimer: false,
   reducedMotion: false,
   acknowledgedAge: false,
   soundEnabled: true,
   renderer: 'iso2d',
-  sandboxUiMode: 'self',
   retentionDays: 0,
   locale: 'zh-CN',
   outlineMode: false,

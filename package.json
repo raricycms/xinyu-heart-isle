@@ -21,9 +21,11 @@
     "visual:self-test": "node scripts/audit/visual-self-test.mjs",
     "perf:render": "node scripts/render-perf.mjs",
     "perf:render:self-test": "node scripts/audit/render-perf-self-test.mjs",
+    "audit:ghost": "node scripts/audit/ghost-fields.mjs --strict",
+    "audit:ghost:self-test": "node scripts/audit/ghost-fields-self-test.mjs",
     "perf": "node --experimental-strip-types scripts/audit/perf.ts",
     "validate": "node --experimental-strip-types scripts/validate-session.ts",
-    "check": "npm run typecheck:all && npm run build && npm run test && npm run validate -- samples/example.sandplay.json && npm run e2e && npm run visual && npm run perf:render && npm run a11y && npm run perf"
+    "check": "npm run typecheck:all && npm run audit:ghost && npm run build && npm run test && npm run validate -- samples/example.sandplay.json && npm run e2e && npm run visual && npm run perf:render && npm run a11y && npm run perf"
   },
   "dependencies": {
     "react": "^19.3.1",
