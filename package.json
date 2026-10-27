@@ -25,9 +25,11 @@
     "audit:ghost:self-test": "node scripts/audit/ghost-fields-self-test.mjs",
     "audit:i18n": "node scripts/audit/i18n-dead-keys.mjs --strict",
     "audit:i18n:self-test": "node scripts/audit/i18n-dead-keys-self-test.mjs",
+    "audit:css": "node scripts/audit/css-tokens.mjs",
+    "audit:css:self-test": "node scripts/audit/css-tokens-self-test.mjs",
     "perf": "node --experimental-strip-types scripts/audit/perf.ts",
     "validate": "node --experimental-strip-types scripts/validate-session.ts",
-    "check": "npm run typecheck:all && npm run audit:ghost && npm run audit:i18n && npm run build && npm run test && npm run validate -- samples/example.sandplay.json && npm run e2e && npm run visual && npm run perf:render && npm run a11y && npm run perf"
+    "check": "npm run typecheck:all && npm run audit:ghost && npm run audit:i18n && npm run audit:css && npm run build && npm run test && npm run validate -- samples/example.sandplay.json && npm run e2e && npm run visual && npm run perf:render && npm run a11y && npm run perf"
   },
   "dependencies": {
     "react": "^19.3.1",

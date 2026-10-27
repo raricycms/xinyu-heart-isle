@@ -31,7 +31,7 @@
 **一键跑全部门禁**：`npm run check`
 （= `typecheck:all` + `test` + `build` + `validate` + `e2e` + `a11y` + `perf`，7 条串起来，exit 0 即全绿）。
 
-**七条「门禁的自检」不在 `check` 里**（它们各自要跑 1–5 分钟，且需要先有 `dist`）：
+**八条「门禁的自检」不在 `check` 里**（它们各自要跑 1–5 分钟，且需要先有 `dist`）：
 
 | 命令 | 验证什么 | CI |
 | --- | --- | --- |
@@ -42,8 +42,9 @@
 | `npm run perf:render:self-test` | 渲染性能断言有效：摆件数不符 / 绘制被拖慢必须被抓到 | ✅ |
 | `npm run audit:ghost:self-test` | 幽灵字段检测器有效：无人读写 / 有读无写必须被抓到，真实写法不许误报 | ✅ |
 | `npm run audit:i18n:self-test` | i18n 死键检测器有效：动态前缀边界必须正确（`sandbox.sceneX` 不被 `sandbox.scene` 覆盖），两表对齐/少键/占位符/顺序/重复 5 类变异必须被抓到 | ✅ |
+| `npm run audit:css:self-test` | CSS 未定义变量检测器有效：未定义且无 fallback 必须判红，有 fallback / 已定义 / 注释里 / 后文才定义 / 跨文件定义 必须放行 | ✅ |
 
-> `npm run audit:ghost` 与 `npm run audit:i18n` **在 `check` 里** ——
+> `npm run audit:ghost`、`npm run audit:i18n`、`npm run audit:css` **在 `check` 里** ——
 > 它们是纯静态扫描，秒级，没有理由不每次跑。
 
 > 为什么要单独有这几个：**从没红过的断言不算门禁**。

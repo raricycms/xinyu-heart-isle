@@ -73,6 +73,74 @@
   --shadow-md: 0 8px 24px rgba(35, 40, 42, 0.07);
   --shadow-lg: 0 18px 48px rgba(35, 40, 42, 0.1);
 
+  /*
+   * ---------------------------------------------------------------------
+   * 补齐被引用但从未定义的一组 token
+   *
+   * 【这一节是修 bug，不是新设计】
+   *
+   * `sandbox-workbench.css` / `sandbox-replay.css` / `toolbox.css` 里有
+   * 99 处 `var(--x)`，其中 **81 处指向从未定义过的变量且没有 fallback**。
+   * CSS 的规则是：`var()` 解析失败 → 整条声明被**丢弃**，且**不报错**。
+   * 于是 `font-size: var(--fs-sm)`、`border-radius: var(--r-pill)`、
+   * `box-shadow: var(--shadow-1)` 全部静默失效，浏览器回退到 initial 值
+   * （字号继承、圆角 0、阴影 none）。
+   *
+   * 这解释了为什么工作台看起来很「平」：圆角与阴影一直没生效。
+   * 这类问题 tsc 看不见、单测看不见、E2E 也不会红 —— 只有把 CSS 里
+   * 每一个 `var()` 拿去和 `global.css` 的定义表对账才查得出来。
+   * 对账脚本见 `npm run audit:css`。
+   *
+   * 命名沿用原作者的意图（`--fs-*`、`--shadow-1..3`、`--r-pill`），
+   * 而不是去改 81 处调用点 —— 后者风险大且没有必要，前者只需定义一次。
+   * ---------------------------------------------------------------------
+   */
+
+  /* 字号阶梯（原来完全缺失）。数值对齐项目里散落的 rem/px 写法。 */
+  --fs-xs: 11.5px;
+  --fs-sm: 12.5px;
+  --fs-base: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+
+  /* 阴影别名：--shadow-1..3 等价于 sm/md/lg（旧代码用的编号命名） */
+  --shadow-1: var(--shadow-sm);
+  --shadow-2: var(--shadow-md);
+  --shadow-3: var(--shadow-lg);
+
+  /* 胶囊圆角别名 */
+  --r-pill: var(--r-full);
+
+  /* 动画时长（原来完全缺失，导致所有 transition 声明被丢弃） */
+  --dur-fast: 120ms;
+  --dur-base: 220ms;
+  --dur-slow: 380ms;
+
+  /* 衬线字体：有 --font-display 但没有 --font-serif，两个文件都引用了后者 */
+  --font-serif: var(--font-display);
+
+  /* 颜色别名：旧代码按数字序号写的 ink 阶梯 */
+  --ink-1: var(--ink-900);
+  --ink-2: var(--ink-700);
+  --ink-3: var(--ink-500);
+  --ink-4: var(--ink-400);
+  --ink-600: var(--ink-500);
+  --ink-800: var(--ink-900);
+  --surface-2: var(--surface-raised);
+
+  /* 语义色别名：watch（注意）/ clay（陶土）/ good（正向） */
+  --watch-100: #f7eed8;
+  --watch-500: #c8973f;
+  --watch-700: #8a6520;
+  --clay-700: #7d5426;
+  --good-500: #4f9c72;
+
+  /* 强调色的两个派生：浅底与深字（工作台徽标用） */
+  --c-accent-soft: var(--teal-100);
+  --c-accent-ink: #24564f;
+  --teal-800: var(--teal-700);
+  --c-sand: #e8dcc8;
+
   /* 间距 */
   --sp-1: 4px;
   --sp-2: 8px;
