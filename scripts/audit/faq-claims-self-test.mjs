@@ -115,6 +115,32 @@ console.log('');
   }
 }
 
+/* 变异 6：HANDOVER 里的环节数与 package.json 不一致 */
+/*
+ * 「22 个环节」这个事实同时写在 FAQ 和 HANDOVER 两处。
+ * 这正是上面「同一事实写多处」那个坑的又一次现身 ——
+ * 两份文档说法不一致，比只有一份写错更难查（读者不知道信哪个）。
+ */
+{
+  const HANDOVER = 'docs/HANDOVER.md';
+  const hoOrig = readFileSync(HANDOVER, 'utf8');
+  const m = hoOrig.replace(/(\d+) 个环节/, '99 个环节');
+  check('变异点 6 已定位（HANDOVER 环节数→99）', m !== hoOrig);
+  if (m !== hoOrig) {
+    try {
+      writeFileSync(HANDOVER, m, 'utf8');
+      const r = runGate();
+      check('  门禁变红', r.code !== 0, 'exit=' + r.code);
+      check('  报出 HANDOVER 那个错数', /HANDOVER=99/.test(r.out), r.out.slice(-300));
+      check('  也报出两份文档说的不是一个数', /FAQ 与 HANDOVER 说的是同一个数/.test(r.out),
+        r.out.slice(-300));
+    } finally {
+      writeFileSync(HANDOVER, hoOrig, 'utf8');
+    }
+    check('HANDOVER 逐字节还原', readFileSync(HANDOVER, 'utf8') === hoOrig);
+  }
+}
+
 {
   restore();
   const r = runGate();
@@ -124,4 +150,4 @@ console.log('');
 
 console.log('');
 if (failures > 0) { console.error('✗ ' + failures + ' / ' + checks + ' 项失败'); process.exit(1); }
-console.log('✓ ' + checks + ' 项：5 种断言写错都会让门禁变红');
+console.log('✓ ' + checks + ' 项：6 种断言/文档写错都会让门禁变红');

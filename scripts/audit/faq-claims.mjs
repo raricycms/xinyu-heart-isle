@@ -187,11 +187,11 @@ console.log('');
 /* ── 门禁自身的一致性 ── */
 {
   /*
-   * ⚠️ 这里的「20 个环节」有个自指陷阱：把本门禁加进 `check` 之后，
-   * `check` 就变成 21 个环节，FAQ 那句话立刻过期，门禁自己把自己搞红。
+   * ⚠️ 这里的「22 个环节」有个自指陷阱：把本门禁加进 `check` 之后，
+   * `check` 的环节数就变了，FAQ 那句话立刻过期，门禁自己把自己搞红。
    *
-   * 所以断言不是"等于 20"，而是"FAQ 里写的数字 === package.json 里
-   * 实际拆出来的环节数"。这样加环节只需同步改 FAQ 一处数字，
+   * 所以断言不是"等于某个固定数字"，而是"FAQ 里写的数字 ===
+   * package.json 里实际拆出来的环节数"。这样加环节只需同步改文档，
    * 而不会出现"代码对了门禁说错"的假红。
    */
   const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
@@ -202,6 +202,29 @@ console.log('');
     claimed !== null && Number(claimed[1]) === steps,
     `FAQ=${claimed ? claimed[1] : '?'} 实际=${steps}`);
   item('FAQ 警告 e2e 不构建', /e2e.*不会自动构建|不构建/.test(faq.replace(/\n/g, ' ')), 'FAQ 明文');
+
+  /*
+   * 同一个「环节数」事实在 HANDOVER 里也写了一次。
+   * 这正是上面「同一事实写多处、门禁只盯一处」那个坑的又一次现身 ——
+   * 所以顺手一起校验。两份文档说法不一致，比只有一份写错更难查。
+   */
+  const handover = src('docs/HANDOVER.md');
+  const hoClaimed = /(\d+)\s*个环节/.exec(handover);
+  item('HANDOVER 也写了环节数', hoClaimed !== null, 'HANDOVER 里没写');
+  item('HANDOVER 里的环节数 === package.json 实际环节数',
+    hoClaimed !== null && Number(hoClaimed[1]) === steps,
+    `HANDOVER=${hoClaimed ? hoClaimed[1] : '?'} 实际=${steps}`);
+  item('FAQ 与 HANDOVER 说的是同一个数',
+    claimed !== null && hoClaimed !== null && claimed[1] === hoClaimed[1],
+    `FAQ=${claimed ? claimed[1] : '?'} HANDOVER=${hoClaimed ? hoClaimed[1] : '?'}`);
+
+  /*
+   * HANDOVER 那句「六条自测不在 check 里」也要与事实一致：
+   * 如果哪天把它们全接进 check，这句话就成了假的。
+   */
+  const notInCheck = /(\六|[\d]+)\s*条「门禁的自检」仍然不在/.exec(handover);
+  item('HANDOVER 仍声明有自测不在 check 里（否则该改说法）',
+    notInCheck !== null, '这句被删了 —— 若已全部接入 check，请更新这句话');
 }
 
 /* ── 许可 ── */
