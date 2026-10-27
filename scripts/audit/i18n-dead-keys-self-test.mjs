@@ -23,8 +23,8 @@
  *   I4: 前缀相近但不同（sandbox.sceneX vs sandbox.scene.*）→ 必须判「死键」
  *       —— 这条专打前缀边界写松的情况
  */
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const ROOT = process.cwd();
@@ -41,9 +41,10 @@ function check(name, ok, detail) {
 /**
  * 造一棵迷你树跑检测器。
  * @param {string} consumerSource 消费者源码
- * @returns {string} 检测器输出
+ * @param {string} [enDict] en 字典源码；省略时用一份与 zh 完全对齐的默认值
+ * @returns {{ out: string, code: number }} 检测器输出与退出码
  */
-function runDetector(consumerSource) {
+function runDetector(consumerSource, enDict) {
   rmSync(MUT_ROOT, { recursive: true, force: true });
   mkdirSync(path.join(MUT_ROOT, 'src/i18n'), { recursive: true });
   mkdirSync(path.join(MUT_ROOT, 'src/pages'), { recursive: true });
@@ -55,25 +56,40 @@ function runDetector(consumerSource) {
   'sandbox.scene.beach': '沙滩',
   'sandbox.orphan': '没人用',
   'sandbox.sceneX.ghost': '前缀相近但是另一个命名空间',
+  'sandbox.count': '{count} 件',
+};
+`,
+    'utf8',
+  );
+  writeFileSync(
+    path.join(MUT_ROOT, 'src/i18n/en.ts'),
+    enDict ??
+      `export const en = {
+  'sandbox.tool.dig': 'Dig',
+  'sandbox.scene.beach': 'Beach',
+  'sandbox.orphan': 'Nobody uses me',
+  'sandbox.sceneX.ghost': 'Another namespace',
+  'sandbox.count': '{count} items',
 };
 `,
     'utf8',
   );
   writeFileSync(path.join(MUT_ROOT, 'src/pages/consumer.tsx'), consumerSource, 'utf8');
 
-  return execFileSync(process.execPath, [DETECTOR], {
+  // 检测器正常退出是 0，--strict 下有问题才是 1；用 spawnSync 拿两者
+  const result = spawnSync(process.execPath, [DETECTOR, '--strict'], {
     cwd: MUT_ROOT,
     encoding: 'utf8',
     env: { ...process.env, I18N_ROOT: MUT_ROOT },
-    stdio: ['ignore', 'pipe', 'pipe'],
   });
+  return { out: `${result.stdout ?? ''}${result.stderr ?? ''}`, code: result.status ?? -1 };
 }
 
 console.log('i18n 死键检测器自检\n');
 
 // I1 + I2：字面量与动态前缀都必须判「在用」，死键必须被抓到
 {
-  const out = runDetector(
+  const { out } = runDetector(
     `import { useI18n } from '../i18n';
 export function C({ sceneId }: { sceneId: string }) {
   const { t } = useI18n();
@@ -91,7 +107,7 @@ export function C({ sceneId }: { sceneId: string }) {
 
 // I4：前缀边界 —— sandbox.sceneX 不该被 sandbox.scene 的前缀覆盖
 {
-  const out = runDetector(
+  const { out } = runDetector(
     `import { useI18n } from '../i18n';
 export function C({ sceneId }: { sceneId: string }) {
   const { t } = useI18n();
@@ -103,6 +119,105 @@ export function C({ sceneId }: { sceneId: string }) {
   // 它不该匹配 sandbox.scene 前缀
   const boundaryOk = /^\s+✗ sandbox\.sceneX\.ghost$/m.test(out);
   check('I4 前缀相近但不同命名空间不被误判为在用', boundaryOk, boundaryOk ? '' : '被漏放了');
+}
+
+/* -------------------------------------------------------------------------- */
+/* 字典自洽                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const ALL_USED_CONSUMER = `import { useI18n } from '../i18n';
+export function C({ sceneId, count }: { sceneId: string; count: number }) {
+  const { t } = useI18n();
+  return (
+    <span>
+      {t('sandbox.tool.dig')}
+      {t('sandbox.scene.beach')}
+      {t('sandbox.orphan')}
+      {t('sandbox.sceneX.ghost')}
+      {t('sandbox.count', { count })}
+      {t(\`sandbox.scene.\${sceneId}\`)}
+    </span>
+  );
+}
+`;
+
+// P1：完全对齐时必须过
+{
+  const { out, code } = runDetector(ALL_USED_CONSUMER);
+  const parityOk = /✓ 两套字典键集、顺序、占位符完全一致/.test(out);
+  check('P1 两表对齐时通过', parityOk && code === 0, code === 0 ? '' : `exit=${code}`);
+}
+
+// P2：en 少一个键必须被抓到
+{
+  const { out, code } = runDetector(
+    ALL_USED_CONSUMER,
+    `export const en = {
+  'sandbox.tool.dig': 'Dig',
+  'sandbox.scene.beach': 'Beach',
+  'sandbox.orphan': 'Nobody uses me',
+  'sandbox.sceneX.ghost': 'Another namespace',
+};
+`,
+  );
+  check(
+    'P2 en 少一个键被抓到',
+    /只在 zh-CN 有：sandbox\.count/.test(out) && code === 1,
+    `exit=${code}`,
+  );
+}
+
+// P3：占位符不一致必须被抓到 —— 这类错误运行时才露出字面量 {count}
+{
+  const { out, code } = runDetector(
+    ALL_USED_CONSUMER,
+    `export const en = {
+  'sandbox.tool.dig': 'Dig',
+  'sandbox.scene.beach': 'Beach',
+  'sandbox.orphan': 'Nobody uses me',
+  'sandbox.sceneX.ghost': 'Another namespace',
+  'sandbox.count': 'some items',
+};
+`,
+  );
+  check(
+    'P3 占位符缺 {count} 被抓到',
+    /占位符不一致 sandbox\.count/.test(out) && code === 1,
+    `exit=${code}`,
+  );
+}
+
+// P4：顺序不同必须被抓到 —— 顺序错乱说明改一边忘了一边
+{
+  const { out, code } = runDetector(
+    ALL_USED_CONSUMER,
+    `export const en = {
+  'sandbox.scene.beach': 'Beach',
+  'sandbox.tool.dig': 'Dig',
+  'sandbox.orphan': 'Nobody uses me',
+  'sandbox.sceneX.ghost': 'Another namespace',
+  'sandbox.count': '{count} items',
+};
+`,
+  );
+  check('P4 两表键顺序不一致被抓到', /键顺序不一致/.test(out) && code === 1, `exit=${code}`);
+}
+
+// P5：重复键必须被抓到
+{
+  const { out, code } = runDetector(
+    ALL_USED_CONSUMER,
+    `export const en = {
+  'sandbox.tool.dig': 'Dig',
+  'sandbox.scene.beach': 'Beach',
+  'sandbox.orphan': 'Nobody uses me',
+  'sandbox.sceneX.ghost': 'Another namespace',
+  'sandbox.count': '{count} items',
+  'sandbox.count': '{count} items again',
+};
+`,
+  );
+  check('P5 en 重复键被抓到', /en 重复键：sandbox\.count/.test(out) && code === 1, `exit=${code}`);
 }
 
 rmSync(MUT_ROOT, { recursive: true, force: true });

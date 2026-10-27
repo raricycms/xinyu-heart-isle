@@ -41,7 +41,7 @@
 | `npm run visual:self-test` | 视觉回归断言有效：注入随机噪点 / 擦掉画面必须被抓到 | ✅ |
 | `npm run perf:render:self-test` | 渲染性能断言有效：摆件数不符 / 绘制被拖慢必须被抓到 | ✅ |
 | `npm run audit:ghost:self-test` | 幽灵字段检测器有效：无人读写 / 有读无写必须被抓到，真实写法不许误报 | ✅ |
-| `npm run audit:i18n:self-test` | i18n 死键检测器有效：动态前缀边界必须正确（`sandbox.sceneX` 不被 `sandbox.scene` 覆盖） | ✅ |
+| `npm run audit:i18n:self-test` | i18n 死键检测器有效：动态前缀边界必须正确（`sandbox.sceneX` 不被 `sandbox.scene` 覆盖），两表对齐/少键/占位符/顺序/重复 5 类变异必须被抓到 | ✅ |
 
 > `npm run audit:ghost` 与 `npm run audit:i18n` **在 `check` 里** ——
 > 它们是纯静态扫描，秒级，没有理由不每次跑。

@@ -93,4 +93,66 @@ if (dead.length > 0) {
   console.log('✓ 没有死键');
 }
 
-process.exit(STRICT && dead.length > 0 ? 1 : 0);
+/*
+ * ---------------------------------------------------------------------------
+ * 字典自洽：两套字典的键集、顺序、占位符必须一致。
+ *
+ * 这条是补上的 —— 清理 42 个死键时删了 33 行键值对，每次都要担心
+ * 「zh 删了、en 忘了删」。少一个键的后果不是编译错误，而是英文用户
+ * 在那个位置看到中文，或者看到字面量 `settings.retention.days`。
+ * 类型系统看不见它（键是运行时字符串），只能由脚本守。
+ * ---------------------------------------------------------------------------
+ */
+const zhSrc = readFileSync(path.join(ROOT, 'src/i18n/zh-CN.ts'), 'utf8');
+const enSrc = readFileSync(path.join(ROOT, 'src/i18n/en.ts'), 'utf8');
+const parity = [];
+
+{
+  const KEYS = /^ {2}'([A-Za-z0-9_.]+)':/gm;
+  const PAIRS = /^ {2}'([A-Za-z0-9_.]+)':\s*'((?:[^'\\]|\\.)*)',/gm;
+  const zhKeys = [...zhSrc.matchAll(KEYS)].map((m) => m[1]);
+  const enKeys = [...enSrc.matchAll(KEYS)].map((m) => m[1]);
+
+  for (const k of new Set(zhKeys.filter((k, i) => zhKeys.indexOf(k) !== i))) {
+    parity.push(`zh-CN 重复键：${k}`);
+  }
+  for (const k of new Set(enKeys.filter((k, i) => enKeys.indexOf(k) !== i))) {
+    parity.push(`en 重复键：${k}`);
+  }
+  for (const k of zhKeys) if (!enKeys.includes(k)) parity.push(`只在 zh-CN 有：${k}`);
+  for (const k of enKeys) if (!zhKeys.includes(k)) parity.push(`只在 en 有：${k}`);
+
+  if (zhKeys.length !== enKeys.length) {
+    parity.push(`键数不等：zh-CN ${zhKeys.length} / en ${enKeys.length}`);
+  } else {
+    const moved = zhKeys.filter((k, i) => enKeys[i] !== k);
+    if (moved.length > 0) {
+      parity.push(`两表键顺序不一致（${moved.length} 处，首个：${moved[0]}）`);
+    }
+  }
+
+  const collect = (src) => {
+    const map = new Map();
+    for (const m of src.matchAll(PAIRS)) {
+      map.set(m[1], [...m[2].matchAll(/\{(\w+)\}/g)].map((x) => x[1]).sort().join(','));
+    }
+    return map;
+  };
+  const zhPh = collect(zhSrc);
+  const enPh = collect(enSrc);
+  for (const [key, vars] of zhPh) {
+    if (!enPh.has(key)) continue;
+    if (zhPh.get(key) !== enPh.get(key)) {
+      parity.push(`占位符不一致 ${key}：zh-CN[${vars || '无'}] / en[${enPh.get(key) || '无'}]`);
+    }
+  }
+}
+
+console.log('\n字典自洽：');
+if (parity.length === 0) {
+  console.log('  ✓ 两套字典键集、顺序、占位符完全一致');
+} else {
+  for (const p of parity) console.log(`  ✗ ${p}`);
+}
+
+process.exit(STRICT && (dead.length > 0 || parity.length > 0) ? 1 : 0);
