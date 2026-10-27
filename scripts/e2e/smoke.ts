@@ -332,6 +332,73 @@ const scenarios: Scenario[] = [
       } else {
         expectTrue('同意条要么显示要么已被确认', true, '本次运行中已确认过（非首次）');
       }
+
+      /*
+       * 语言切换（i18n）。
+       *
+       * 这条断言的来历：`Preferences.locale` 曾被算作「读 1 写 1 ✓」——
+       * 因为它确实被 `useI18n()` 读、被 `setPreferences` 写。但写入的
+       * 唯一路径是 `setLocale()`，而 **`setLocale()` 零处调用**：
+       * 18 个组件都接了 i18n，`en.ts` 的 162 个英文键在运行时完全不可达。
+       *
+       * 这是幽灵字段的第三阶形态：字段有读有写、hook 也导出了 setter，
+       * 但 setter 本身没人调。静态扫字段名看不出来。
+       *
+       * 所以断言必须跨页面验证「切了语言之后，英文字符串真的出现」——
+       * 只断言按钮 aria-pressed 变化的话，一个什么都不做的假实现也能过。
+       */
+      await page.goto(`${BASE}/about`, { waitUntil: 'domcontentloaded' });
+      await waitAny(page, ['main', 'h1']);
+
+      const zhBtn = await page.$('[data-testid="locale-zh"]');
+      const enBtn = await page.$('[data-testid="locale-en"]');
+      if (!zhBtn || !enBtn) {
+        fail('语言切换按钮存在', `zh=${!!zhBtn} en=${!!enBtn}`);
+      } else {
+        const zhPressed = await zhBtn.evaluate((n) => n.getAttribute('aria-pressed'));
+        expectTrue('默认语言是中文', zhPressed === 'true', `aria-pressed="${zhPressed}"`);
+
+        await enBtn.click();
+        await new Promise((resolve) => setTimeout(resolve, 350));
+
+        const enPressed = await page.$eval('[data-testid="locale-en"]', (n) =>
+          n.getAttribute('aria-pressed'),
+        );
+        expectTrue('点 English 后按钮状态切换', enPressed === 'true', `aria-pressed="${enPressed}"`);
+
+        /*
+         * 关键断言：切到英文后，**沙盘模块的界面文字真的变成英文**。
+         * 去 /sandbox 看渲染器下拉框 —— 它是沙盘模块里 t() 驱动的。
+         * 中文是「立体沙盘（推荐）」，英文是「Layered tray (recommended)」。
+         */
+        await page.goto(`${BASE}/sandbox`, { waitUntil: 'domcontentloaded' });
+        await withTimeout(
+          page.waitForSelector('[data-testid="sandbox-renderer-select"]', { timeout: STEP_TIMEOUT }),
+          STEP_TIMEOUT + 2000,
+          '等待渲染器下拉框',
+        );
+        const optionText = await page.$eval(
+          '[data-testid="sandbox-renderer-select"] option[value="iso2d"]',
+          (n) => n.textContent ?? '',
+        );
+        expectTrue(
+          '切到英文后沙盘界面真的变英文',
+          /layered tray|recommended/i.test(optionText) && !/立体沙盘/.test(optionText),
+          `渲染器选项文字 "${optionText}"（期望英文，不是「立体沙盘」）`,
+        );
+
+        // 切回中文并确认持久化
+        await page.goto(`${BASE}/about`, { waitUntil: 'domcontentloaded' });
+        await waitAny(page, ['main', 'h1']);
+        await page.click('[data-testid="locale-zh"]');
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('[data-testid="locale-zh"]', { timeout: STEP_TIMEOUT });
+        const persistedZh = await page.$eval('[data-testid="locale-zh"]', (n) =>
+          n.getAttribute('aria-pressed'),
+        );
+        expectTrue('语言偏好已持久化（刷新后仍是中文）', persistedZh === 'true', `aria-pressed="${persistedZh}"`);
+      }
     },
   },
 

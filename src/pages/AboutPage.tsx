@@ -1,6 +1,7 @@
-import { ButtonLink } from '@/components/ui/Button';
+import { Button, ButtonLink } from '@/components/ui/Button';
 import { Card, PageHeader, SectionHead } from '@/components/ui/Card';
 import { Notice, Tag } from '@/components/ui/Primitives';
+import { useI18n } from '@/i18n';
 import '@/styles/home.css';
 
 const PRINCIPLES = [
@@ -23,6 +24,8 @@ const PRINCIPLES = [
 ];
 
 export default function AboutPage() {
+  const { locale, setLocale } = useI18n();
+
   return (
     <div className="page">
       <PageHeader
@@ -90,6 +93,50 @@ export default function AboutPage() {
           </div>
         </Card>
       </section>
+
+      {/* ---- 语言 ---- */}
+      {/*
+        这个开关的来历：`Preferences.locale` 凑齐了字段、默认值、两套
+        i18n 字典（中英各 195 键）、18 个组件接入 `useI18n()` —— 但
+        `setLocale()` **零处调用**，所以 `en.ts` 在运行时完全不可达，
+        用户永远只能看中文。又是「有读没写」，只是藏在 hook 返回值里。
+
+        i18n 的真实范围按包内注释就是「沙盘模块」，其余页面仍是中文，
+        这一点在下方说明了 —— 与其假装全站双语，不如把边界摊开。
+      */}
+      <SectionHead title="语言 / Language" />
+      <Card flat className="mb-5">
+        <div className="prose" style={{ fontSize: 13.5 }}>
+          <p>
+            <strong>沙盘模块</strong>已提供中英双语（含工具名、面板、会话报告、
+            回放与对比页）。其余页面目前只有中文。
+          </p>
+          <p className="muted">
+            The sandtray module is available in Chinese and English. Other
+            sections are Chinese-only for now.
+          </p>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <Button
+              size="sm"
+              variant={locale === 'zh-CN' ? 'primary' : 'quiet'}
+              aria-pressed={locale === 'zh-CN'}
+              onClick={() => setLocale('zh-CN')}
+              data-testid="locale-zh"
+            >
+              中文
+            </Button>
+            <Button
+              size="sm"
+              variant={locale === 'en' ? 'primary' : 'quiet'}
+              aria-pressed={locale === 'en'}
+              onClick={() => setLocale('en')}
+              data-testid="locale-en"
+            >
+              English
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       <SectionHead title="内容和数据的可信度" />
       <div className="stack mb-5">

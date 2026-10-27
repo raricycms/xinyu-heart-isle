@@ -93,27 +93,37 @@ export type SandRendererComponent = (
 export interface RendererDescriptor {
   id: 'dom2d' | 'iso2d' | 'three';
   label: string;
+  /** i18n 键：沙盘模块是双语区，标签必须能跟着语言切 */
+  labelKey: string;
   description: string;
   /** 是否需要动态加载（影响是否显示 loading） */
   lazy: boolean;
 }
 
+/*
+ * `labelKey` 是后补的。此前 label 是写死的中文，而 `settings.renderer.*`
+ * 三个键在两套字典里都齐备却零引用 —— 又是「有文案、没接线」。
+ * label 保留作为无 i18n 上下文时的兜底（如纯 TS 的快照/测试）。
+ */
 export const RENDERERS: RendererDescriptor[] = [
   {
     id: 'dom2d',
     label: '简洁平面',
+    labelKey: 'settings.renderer.dom2d',
     description: '最稳、最省电，键盘与读屏最友好。',
     lazy: false,
   },
   {
     id: 'iso2d',
     label: '立体沙盘（推荐）',
+    labelKey: 'settings.renderer.iso2d',
     description: '有纵深、能埋进沙里，看得到沙面起伏。',
     lazy: false,
   },
   {
     id: 'three',
     label: '3D 视角（实验）',
+    labelKey: 'settings.renderer.three',
     description: '可旋转观察的立体沙盘。首次加载会稍慢。',
     lazy: true,
   },

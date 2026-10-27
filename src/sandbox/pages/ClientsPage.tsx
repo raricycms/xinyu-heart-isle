@@ -35,11 +35,19 @@ import '@/styles/sandbox-archive.css';
 /** 档案列表的归档筛选 */
 type ArchiveFilter = 'all' | 'active' | 'archived';
 
-const RETENTION_OPTIONS: Array<{ value: RetentionDays; label: string }> = [
-  { value: 0, label: '永久保留' },
-  { value: 30, label: '30 天' },
-  { value: 90, label: '90 天' },
-  { value: 180, label: '180 天' },
+/*
+ * 保留期选项。
+ *
+ * 原来 label 是写死的中文，而 `settings.retention.forever` /
+ * `settings.retention.days` 两个键在两套字典里都齐备却零引用。
+ * 现在存 labelKey，渲染时再取文案 —— 因为 `t` 只能在组件里拿到，
+ * 而这张表是模块级常量。
+ */
+const RETENTION_OPTIONS: Array<{ value: RetentionDays; labelKey: string; days?: number }> = [
+  { value: 0, labelKey: 'settings.retention.forever' },
+  { value: 30, labelKey: 'settings.retention.days', days: 30 },
+  { value: 90, labelKey: 'settings.retention.days', days: 90 },
+  { value: 180, labelKey: 'settings.retention.days', days: 180 },
 ];
 
 /**
@@ -362,7 +370,7 @@ export default function ClientsPage() {
 
         <div className="field archive-retention">
           <label className="field-label" htmlFor="client-retention">
-            归档保留期
+            {t('settings.retention')}
           </label>
           <select
             id="client-retention"
@@ -372,7 +380,9 @@ export default function ClientsPage() {
           >
             {RETENTION_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {option.days === undefined
+                  ? t(option.labelKey)
+                  : t(option.labelKey, { days: option.days })}
               </option>
             ))}
           </select>

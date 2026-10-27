@@ -139,12 +139,13 @@ export function Toolbar({
           <span className="sr-only">{t('settings.renderer')}</span>
           <select
             className="select wb-select__input"
+            data-testid="sandbox-renderer-select"
             value={renderer}
             onChange={(event) => onRendererChange(event.target.value as RendererKind)}
           >
             {RENDERERS.map((entry) => (
               <option key={entry.id} value={entry.id}>
-                {entry.label}
+                {t(entry.labelKey)}
               </option>
             ))}
           </select>

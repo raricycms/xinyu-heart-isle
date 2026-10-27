@@ -147,7 +147,9 @@ export default function SessionReportPage() {
             <div>开始：{formatDateTime(report.time.startedAt)}</div>
             {report.time.endedAt ? <div>结束：{formatDateTime(report.time.endedAt)}</div> : null}
             <div>场景：{report.sceneLabel}</div>
-            <div>模式：{report.modeLabel}</div>
+            <div>
+              模式：{t(`sandbox.mode.${report.mode}`)}
+            </div>
             <div>状态：{report.lockedLabel}</div>
             {report.clientAlias ? <div>档案：{report.clientAlias}</div> : null}
             {report.sessionNo !== undefined ? <div>第 {report.sessionNo} 次会谈</div> : null}

@@ -2,33 +2,22 @@
 export const zhCN: Record<string, string> = {
   /* --------------------------------- 通用 --------------------------------- */
   'common.cancel': '取消',
-  'common.confirm': '确定',
   'common.save': '保存',
   'common.delete': '删除',
   'common.close': '关闭',
   'common.back': '返回',
-  'common.more': '更多',
   'common.loading': '加载中…',
   'common.none': '无',
-  'common.yes': '是',
-  'common.no': '否',
   'common.undo': '撤销',
   'common.redo': '重做',
-  'common.export': '导出',
-  'common.import': '导入',
-  'common.notDiagnosis': '这不是诊断，也不构成治疗建议。',
 
   /* ------------------------------- 沙盘工作台 ------------------------------ */
-  'sandbox.title': '赛博沙盘',
-  'sandbox.subtitle': '把说不出口的东西，放进去。',
-  'sandbox.disambig': '赛博沙盘（心理沙盘 / sand tray）· 不是网络安全靶场',
   'sandbox.save': '保存沙盘',
   'sandbox.saved': '已保存',
   'sandbox.unsaved': '有未保存的改动',
   'sandbox.lock': '封盘',
   'sandbox.locked': '已封盘',
   'sandbox.lockedHint': '封盘后不能再修改。想继续摆，可以「另存为新会话」。',
-  'sandbox.duplicate': '另存为新会话',
   'sandbox.newSession': '新建沙盘',
   'sandbox.confirmDiscard': '当前沙盘还没保存，确定要离开吗？',
   'sandbox.emptyTray': '沙盘还是空的。从下面挑一个放进来，或者先用手推一推沙。',
@@ -44,9 +33,7 @@ export const zhCN: Record<string, string> = {
   'sandbox.ageGate.minor': '我未满 18 岁，会和监护人一起用',
   'sandbox.ageGate.hint': '这个选择只存在你自己的设备上，不会上传。',
   'sandbox.ageGate.minorHint': '好的。需要时可以随时回到「危机与求助」看看。',
-  'sandbox.itemCount': '已放 {count} 件',
   'sandbox.surfaceHint': '拖动笔刷在沙面上推、挖、抹。松手才算一笔。',
-  'sandbox.selectFirst': '先选中一个摆件',
   'sandbox.reflectionLabel': '想说的一句话（可选）',
   'sandbox.reflectionPlaceholder': '不用写得完整，一个词也行。',
   'sandbox.titlePlaceholder': '给这个沙盘起个名字',
@@ -84,8 +71,6 @@ export const zhCN: Record<string, string> = {
   'sandbox.item.bury': '埋进沙里',
   'sandbox.item.scale': '大小',
   'sandbox.item.rotate': '角度',
-  'sandbox.item.audio': '录一句',
-  'sandbox.item.audioRecording': '录音中…点击停止',
 
   /* --------------------------------- 沙具库 -------------------------------- */
   'sandbox.library': '沙具',
@@ -136,7 +121,6 @@ export const zhCN: Record<string, string> = {
   'replay.annotationPlaceholder': '咨询师/督导用；用户自己也可以写。',
   'replay.annotationEmpty': '还没有批注。',
   'replay.notFound': '找不到这次沙盘，可能已被删除。',
-  'replay.archived': '这次沙盘已归档。',
   'replay.noEvents': '这次沙盘没有过程记录（可能是旧版本保存的）。',
 
   /* --------------------------------- 统计 --------------------------------- */
@@ -162,10 +146,8 @@ export const zhCN: Record<string, string> = {
   'compare.subtitle': '同一段时间里的几次沙盘放在一起看，变化由你自己判断。',
   'compare.selectHint': '选 2~4 次沙盘进行对比',
   'compare.selected': '已选 {count} 次',
-  'compare.compare': '对比',
   'compare.needTwo': '至少选两次。',
   'compare.change': '与上次相比',
-  'compare.itemDelta': '摆件数变化',
   'compare.sameScene': '同一场景',
   'compare.differentScene': '换了场景',
 
@@ -181,7 +163,6 @@ export const zhCN: Record<string, string> = {
   'clients.sessionCount': '{count} 次沙盘',
   'clients.lastSession': '最近一次：{date}',
   'clients.delete': '删除档案',
-  'clients.deleteHint': '删除档案不会删除已有的沙盘记录。',
   'clients.archived': '已归档',
   'clients.privacy': '不要填写真实姓名、手机号、身份证号。',
 
@@ -199,7 +180,6 @@ export const zhCN: Record<string, string> = {
   'report.disclaimer': '本记录仅为过程事实，不含解释与诊断。',
 
   /* --------------------------------- 设置 --------------------------------- */
-  'settings.title': '显示与辅助',
   'settings.renderer': '沙盘显示方式',
   'settings.renderer.dom2d': '简洁平面',
   'settings.renderer.iso2d': '立体沙盘（推荐）',
@@ -210,8 +190,6 @@ export const zhCN: Record<string, string> = {
   'settings.retention': '归档保留期',
   'settings.retention.forever': '永久保留',
   'settings.retention.days': '{days} 天',
-  'settings.locale': '语言',
-  'settings.purge': '按保留期清理归档',
 
   /* --------------------------------- 封盘 --------------------------------- */
   'lock.title': '要封盘了吗？',
@@ -220,18 +198,7 @@ export const zhCN: Record<string, string> = {
   'lock.cancel': '再摆一会儿',
 
   /* -------------------------------- 提示文案 ------------------------------- */
-  'toast.saved': '已保存到这台设备',
-  'toast.saveFailed': '这次没存上：本地存储空间可能不够了。建议先导出一份备份。',
   'toast.exported': '已导出',
-  'toast.imported': '已导入',
-  'toast.importFailed': '导入失败：{reason}',
-  'toast.deleted': '已删除',
-  'toast.locked': '已封盘',
-  'toast.undo': '已撤销',
-  'toast.redo': '已重做',
-  'toast.purged': '已清理 {count} 个过期归档',
-  'toast.noExpired': '没有需要清理的归档',
-  'toast.copied': '已复制',
 
   /* --------------------------------- 边界 --------------------------------- */
   'sandbox.ethics': '系统不会分析你的沙盘，也不会告诉你它"代表什么"。解释权在你手里。',

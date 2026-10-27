@@ -229,7 +229,14 @@ export default function HomePage() {
           <span>◍ 不需要注册登录</span>
           <span>◍ 不构成医疗诊断</span>
         </div>
-      </section>
+        {/*
+          VISION「名称」一节的硬要求：中文保留「赛博沙盘」做栏目名，
+          但**首段必须消歧** —— 因为「赛博沙盘」在中文语境里已被
+          网络安全靶场（cyber range）占用过，仓库里那份调研文档
+          讲的正是靶场，与心理沙盘毫无关系。
+          这句话一直缺着（`sandbox.disambig` 这个键写了没人用）。
+        */}
+        <p className="hero__disambig">赛博沙盘（心理沙盘 / sand tray）· 不是网络安全靶场</p>      </section>
 
       {/*
         这里曾经有一个「有昵称才显示」的问候分支：

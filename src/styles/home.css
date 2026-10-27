@@ -55,6 +55,20 @@
   font-size: 12.5px;
 }
 
+/*
+ * 首段消歧（VISION「名称」）。
+ * 存在的理由不是审美，是**撞名**：「赛博沙盘」在中文语境里曾被
+ * 网络安全靶场占用，而仓库里那份调研文档讲的正是靶场。
+ * 所以这句必须出现在首屏、必须低调但可读 —— 它是给人看的事实澄清，
+ * 不是免责声明，因此不用警示色。
+ */
+.hero__disambig {
+  margin-top: var(--sp-3);
+  color: var(--ink-400);
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+}
+
 .hero__meta span {
   display: inline-flex;
   align-items: center;

@@ -63,6 +63,7 @@ export default function ComparePage() {
         <Empty
           icon="◌"
           title="至少需要两次沙盘才能对比"
+          desc={t('compare.needTwo')}
           action={<Button onClick={() => navigate('/sandbox')}>去摆一次</Button>}
         />
       </div>
@@ -227,6 +228,7 @@ export default function ComparePage() {
 /* -------------------------------------------------------------------------- */
 
 function DiffPanel({ before, after }: { before: SandSession; after: SandSession }) {
+  const { t } = useI18n();
   const diff = useMemo(() => diffSessions(before, after), [before, after]);
   const sameCount = diff.facts.filter((fact) => fact.direction === 'same' && fact.change === '0').length;
 
@@ -251,7 +253,7 @@ function DiffPanel({ before, after }: { before: SandSession; after: SandSession 
               <th scope="col">项目</th>
               <th scope="col">前一次</th>
               <th scope="col">后一次</th>
-              <th scope="col">变化</th>
+              <th scope="col">{t('compare.change')}</th>
             </tr>
           </thead>
           <tbody>
