@@ -1337,6 +1337,69 @@ v2.0 收尾时对账一次，结果是 81 处引用、27 个从未定义的 toke
 
 ---
 
+### 4.x 体积预算：`scripts/audit/bundle-budget.mjs`（`npm run audit:budget`）
+
+> **为什么会有这个脚本**：VISION §5.9 L344 写着「首屏 JS ≤ 200KB gzip」，
+> CONTRACT §7 写着「主包 ≤ 175KB」，两处数字都不一致，而**没有任何命令在量**。
+> §7 表格的"验证方式"写的是 `npx vite build 输出（实测 ~140KB）` ——
+> `vite build` 只打印文件列表，从不判定。
+>
+> 结果：8 个页面全静态塞进主包（`ScaleRunPage` + `scales/data` 就占 55KB
+> 源码），实测首屏 145.8KB，"离 175KB 还有 30KB，看起来很安全" ——
+> 其实再来两个页面就越线，而所有测试仍然全绿。
+
+#### 口径必须写死，否则等于没量
+
+「主包」这个词可以随便解释，三个口径差 70KB：
+
+| 口径 | 数值 | 问题 |
+| --- | --- | --- |
+| 只算 `index-*.js` | 142.5KB | 漏掉静态依赖的 `jsx-runtime` |
+| 沿静态 import 链累加 | 145.8KB | **本项目采用这个** |
+| 所有 chunk 相加 | 211KB | 把懒加载页面也算进去，虚高 |
+
+采用第二条：从 `index` 出发，只看 `import"./x.js"` / `from"./x.js"`
+这类**静态**引用；`import("./x.js")` 与 `__vitePreload` 是动态加载，不算。
+
+#### 四条判据
+
+| 判据 | 阈值 | 为什么 |
+| --- | --- | --- |
+| 首屏 JS gzip | ≤ 200KB（**判失败线 210KB**） | VISION §5.9 L344 |
+| `three` chunk gzip | ≤ 600KB | 同上 |
+| `three` 不在主包 | 必须在静态链之外 | 混进主包就没法懒加载了 |
+| `SafetyPage` 不得拆包 | dist 里不能有 `SafetyPage-*.js` | 危机页不允许有加载延迟 |
+
+第 4 条看起来跟体积无关，但它是**红线**：`/safety` 要求任何页面
+≤2 次点击可达（CONTRACT §5）。给它加一层网络往返，等于在最需要它的
+时刻让它变慢甚至失败。变异验证过：改成懒加载后首屏 112.4 → 105.8KB
+（数字更好看）但门禁红。**安全红线不能拿性能指标交换。**
+
+判失败线留 5% 抖动（210KB）而非卡死 200KB：gzip 输出会随依赖小版本
+变化几十字节到一两 KB，卡在线上会让无关的依赖升级把门禁打红，
+久了就没人看了。真正要拦的是「又塞了一个页面」这种几十 KB 的量级。
+
+#### 自测：`audit:budget:self-test`（9 项）
+
+在临时目录造**假 dist**，验证该红时会红（不依赖真实仓库的体积数字，
+那样一改依赖就得改测试，最后会退化成恒真断言）：
+
+- 达标 → 退出 0
+- 首屏超线 → 退出 1
+- `SafetyPage` 被拆包 → 退出 1
+- `three` 混进主包 → 退出 1
+- 没有 `dist` → 退出 1（**不能假绿**）
+
+这个自测自己抓到三个 bug，都写在脚本注释里：
+相对路径写死（只在仓库根可用）、压缩率估错两次
+（`(i*7919)%36` 周期 36；LCG 在 JS 里溢出退化成短周期）、
+假 dist 少了一层 `dist/` 目录。
+
+> **教训：判断一个指标有没有用，先看它能不能红。**
+> 不能红的指标，绿得再久也不说明任何事。
+
+---
+
 ## 5. 棘轮基线（a11y）
 
 > **现状（v2.0）**：基线已收窄到 **`entries: []`**，当前审计 **critical 0 / warning 0**。
@@ -1490,6 +1553,14 @@ jobs:
       - run: node scripts/audit/ghost-fields.mjs --strict   # 每个偏好字段必须有读有写
       - run: node scripts/audit/ghost-fields-self-test.mjs  # 检测器自己会红吗
 
+      # ---- i18n / CSS / 体积预算 ----
+      - run: node scripts/audit/i18n-dead-keys.mjs --strict
+      - run: node scripts/audit/i18n-dead-keys-self-test.mjs
+      - run: node scripts/audit/css-tokens.mjs
+      - run: node scripts/audit/css-tokens-self-test.mjs
+      - run: node scripts/audit/bundle-budget.mjs           # 首屏 ≤200KB gzip（CONTRACT §7）
+      - run: node scripts/audit/bundle-budget-self-test.mjs # 体积门禁自己会红吗
+
       # ---- 真浏览器门禁 ----
       - run: node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts
       - run: node scripts/audit/e2e-self-test.mjs          # 移动端断言有效
@@ -1529,6 +1600,15 @@ jobs:
 ---
 
 ## 8. 踩过的坑（加测试前先看）
+
+0. **不要 `waitAny(page, ['main', 'h1'])`**。`AppShell` 自己渲染
+   `<main id="main">`（AppShell.tsx L114），所以**任何页面**一挂载它就为真 ——
+   等恒真条件等于没等，断言时序全靠 chunk 下载得快不快。
+   平时绿、CI 慢时红，而且删掉被测功能也依然绿（§9.3/§9.5 同类）。
+   正确做法：
+   - 等懒加载完成 → `waitForRouteReady(page)`（判 `[data-testid="route-loading"]` 消失）
+   - 等页面内容 → `waitForPage(page, '<该页面独有的选择器>')`
+   验证方法：把那个选择器对应的元素从产品代码里删掉，测试必须红。
 
 1. **PowerShell 会把中文写坏**。改含中文的源码**必须**用编辑器/`read`+`edit` 工具，
    不要用 `Set-Content` / `Out-File` —— 会加 UTF-8 BOM 或按 ANSI 转码，

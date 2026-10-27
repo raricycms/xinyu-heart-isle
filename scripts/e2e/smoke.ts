@@ -239,6 +239,79 @@ async function waitAny(page: Page, selectors: string[], timeout = STEP_TIMEOUT):
   return (await found.jsonValue()) as string | null;
 }
 
+/**
+ * 等待**路由懒加载完成**（Suspense fallback 被真实内容替换）。
+ *
+ * ── 这是通用解，优先用它 ────────────────────────────────────────
+ *
+ * `App.tsx` 的 `RouteFallback` 带 `data-testid="route-loading"`。
+ * 所以「懒加载好了没」有一个诚实的判据：
+ *
+ *     document.querySelector('[data-testid="route-loading"]') === null
+ *
+ * 为什么不用 `.spinner` 或 `role="status"`：前者是样式类（会被合法
+ * 重命名），后者是无障碍属性（换个骨架就可能调整）。而这个 testid
+ * 的存在意义就是「我是加载中」，删掉它等于删掉可观测性 ——
+ * 那时本函数会因为「找不到标记」而立刻返回 true，
+ * 恰好又变成幽灵等待。所以**这个 testid 的保留本身也需要被验证**。
+ *
+ * 注意它只能证明「懒加载完成了」，不能证明「页面内容对」——
+ * 内容断言仍要各自写。两者互补，不能互相替代。
+ */
+async function waitForRouteReady(page: Page, timeout = STEP_TIMEOUT): Promise<boolean> {
+  try {
+    await page.waitForFunction(
+      () => {
+        const main = document.querySelector('main');
+        if (!main) return false;
+        /* 骨架还在 → 懒加载未完成 */
+        return document.querySelector('[data-testid="route-loading"]') === null;
+      },
+      { timeout },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 等待**某个页面自己的内容**出现，而不是等待外层壳。
+ *
+ * ── 为什么不能只用 waitAny(['main', 'h1']) ──────────────────────
+ *
+ * `AppShell` 自己就渲染了 `<main id="main">`（见 AppShell.tsx L114），
+ * 所以**任何页面**一挂载，「main」这个选择器立刻为真。
+ * 路由懒加载之后这就变成了一个幽灵等待：
+ *
+ *   await waitAny(page, ['main', 'h1']);   // ← 立即返回
+ *   const el = await page.$('[data-testid="locale-zh"]');  // ← 还没加载，null
+ *
+ * 表现是「功能明明没坏，E2E 却红了」——然后很容易被误判成产品 bug。
+ * 更糟的是反过来：等一个恒真条件，等于**没等**，断言时序全靠运气。
+ *
+ * ── 判据 ────────────────────────────────────────────────────────
+ *
+ * 传入的必须是在**懒加载 chunk 里才渲染**的元素。判断方法：
+ * 把它从页面组件里删掉，E2E 该红 —— 如果删了还绿，说明选错了锚点。
+ *
+ * 用法：
+ *   await waitForPage(page, '[data-testid="locale-zh"]');   // 好
+ *   await waitForPage(page, 'main');                        // 没用（外壳自带）
+ */
+async function waitForPage(
+  page: Page,
+  selector: string,
+  timeout = STEP_TIMEOUT,
+): Promise<boolean> {
+  try {
+    await page.waitForSelector(selector, { timeout });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                场景定义                                     */
 /* -------------------------------------------------------------------------- */
@@ -255,7 +328,37 @@ const scenarios: Scenario[] = [
     id: 'home',
     name: '首页能渲染、有标题、无 console 错误',
     run: async (page, errors, requests) => {
+      /*
+       * 懒加载可观测性自检（**元断言**）。
+       *
+       * `waitForRouteReady` 靠 `[data-testid="route-loading"]` 判断懒加载
+       * 完成。如果哪天有人把这个 testid 从 RouteFallback 上删掉，
+       * 那个函数会变成「永远找不到标记 → 立刻返回 true」的幽灵等待，
+       * 而所有依赖它的断言依旧绿。
+       *
+       * 所以这里主动制造一次「骨架可见」：先屏蔽 JS 之外的办法不管，
+       * 直接在页面里插一个同样的标记，验证选择器能选中它。
+       * 这证明的是「这个选择器语法有效、能命中 document」，
+       * 是判据可用的必要条件。
+       *
+       * 完整的证明还要靠 tmp/mutate-about.mjs 那类变异：
+       * 把真实按钮改名 → 等待必须失败。两者一起才够。
+       */
       await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+      const routeLoadingSelectorWorks = await page.evaluate(() => {
+        const probe = document.createElement('div');
+        probe.setAttribute('data-testid', 'route-loading');
+        probe.style.display = 'none';
+        document.body.appendChild(probe);
+        const found = document.querySelector('[data-testid="route-loading"]') !== null;
+        probe.remove();
+        return found;
+      });
+      expectTrue(
+        '懒加载骨架标记可被选择器命中（waitForRouteReady 判据有效）',
+        routeLoadingSelectorWorks === true,
+      );
+
       const anchor = await waitAny(page, ['main', 'h1']);
       expectTrue('渲染出 main 或 h1', anchor !== null, `实际：${anchor}`);
 
@@ -323,7 +426,7 @@ const scenarios: Scenario[] = [
           expectTrue('点「我知道了」后同意条消失', goneNow === null);
 
           await page.reload({ waitUntil: 'domcontentloaded' });
-          await waitAny(page, ['main', 'h1']);
+          await waitForRouteReady(page);
           const reappeared = await page.$('[data-testid="consent-band"]');
           expectTrue('知情同意已持久化（刷新后不再出现）', reappeared === null);
         } else {
@@ -348,7 +451,12 @@ const scenarios: Scenario[] = [
        * 只断言按钮 aria-pressed 变化的话，一个什么都不做的假实现也能过。
        */
       await page.goto(`${BASE}/about`, { waitUntil: 'domcontentloaded' });
-      await waitAny(page, ['main', 'h1']);
+      /*
+       * /about 是懒加载路由（首屏体积预算），必须等**这个页面自己的**
+       * 元素出现。等 'main' 没用 —— AppShell 自带 <main>，永远为真。
+       */
+      const aboutReady = await waitForPage(page, '[data-testid="locale-zh"]');
+      expectTrue('关于页加载完成（语言切换按钮就绪）', aboutReady === true);
 
       const zhBtn = await page.$('[data-testid="locale-zh"]');
       const enBtn = await page.$('[data-testid="locale-en"]');
@@ -389,7 +497,8 @@ const scenarios: Scenario[] = [
 
         // 切回中文并确认持久化
         await page.goto(`${BASE}/about`, { waitUntil: 'domcontentloaded' });
-        await waitAny(page, ['main', 'h1']);
+        /* /about 懒加载：直接等目标按钮，而不是等恒真的外壳 */
+        await page.waitForSelector('[data-testid="locale-zh"]', { timeout: STEP_TIMEOUT });
         await page.click('[data-testid="locale-zh"]');
         await new Promise((resolve) => setTimeout(resolve, 300));
         await page.reload({ waitUntil: 'domcontentloaded' });
@@ -438,7 +547,15 @@ const scenarios: Scenario[] = [
     run: async (page, errors, _requests) => {
       // 深链接直开是最容易坏的路由场景（HANDOVER §4.4）
       await page.goto(`${BASE}/scales/phq-9`, { waitUntil: 'domcontentloaded' });
-      const anchor = await waitAny(page, ['main', 'form', '[role="radiogroup"]']);
+      /*
+       * /scales/:id 现在是懒加载路由（首屏体积预算）。
+       * 等 'main' 是等外壳，永远为真；必须等这个页面自己的标题渲染出来。
+       * `scale-intro__title` 是说明页的 <h1>，只有 ScaleRunPage chunk
+       * 加载完才会出现。
+       */
+      const introReady = await waitForPage(page, '.scale-intro__title');
+      expectTrue('作答页加载完成（说明页标题就绪）', introReady === true);
+      const anchor = introReady ? '.scale-intro__title' : null;
       expectTrue('深链接 /scales/phq-9 直开渲染', anchor !== null);
 
       const length = await bodyLength(page);
@@ -1344,7 +1461,13 @@ const scenarios: Scenario[] = [
     name: '记录页：渲染、无报错',
     run: async (page, errors, _requests) => {
       await page.goto(`${BASE}/records`, { waitUntil: 'domcontentloaded' });
-      const anchor = await waitAny(page, ['main']);
+      /*
+       * /records 是懒加载路由。等 'main' 是等外壳（AppShell 自带），恒真；
+       * 必须等 Suspense fallback 被真实内容替换。
+       */
+      const ready = await waitForRouteReady(page);
+      expectTrue('记录页加载完成（懒加载 chunk 就绪）', ready === true);
+      const anchor = ready ? 'main' : null;
       expectTrue('记录页渲染出 main', anchor !== null);
 
       const length = await bodyLength(page);
@@ -1360,7 +1483,15 @@ const scenarios: Scenario[] = [
     name: '安全页：热线 tel: 链接可点（红线）',
     run: async (page, errors, _requests) => {
       await page.goto(`${BASE}/safety`, { waitUntil: 'domcontentloaded' });
-      const anchor = await waitAny(page, ['main']);
+      /*
+       * 安全页是**静态**路由（危机页零延迟，见 App.tsx 拆包策略），
+       * 所以这里没有懒加载可等；但等 'main' 仍然恒真（外壳自带）。
+       * 改为等页面真正的标志：至少有一个 tel: 链接。
+       * 这条顺带守住红线 —— 热线链接没渲染出来就算失败。
+       */
+      const hasTel = await waitForPage(page, 'a[href^="tel:"]');
+      expectTrue('安全页渲染出热线链接', hasTel === true);
+      const anchor = hasTel ? 'main' : null;
       expectTrue('安全页渲染出 main', anchor !== null);
 
       const telLinks = await page.$$eval('a[href^="tel:"]', (nodes) =>
@@ -1409,7 +1540,9 @@ const scenarios: Scenario[] = [
       const routes = ['/', '/sandbox', '/records', '/toolbox/breathing-478', '/scales/phq-9'];
       for (const route of routes) {
         await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' });
-        const anchor = await waitAny(page, ['main']);
+        /* 多数路由是懒加载的，等壳没用（理由见 waitForRouteReady 注释） */
+        const routeReady = await waitForRouteReady(page);
+        const anchor = routeReady ? 'main' : null;
         expectTrue(`${route} 在 390px 下渲染出 main`, anchor !== null);
 
         // 等布局稳定：字体/图片加载会改变宽度
@@ -1718,12 +1851,18 @@ const scenarios: Scenario[] = [
     name: '深链接刷新（SPA fallback + base:"/"）：/sandbox/compare',
     run: async (page, errors, _requests) => {
       await page.goto(`${BASE}/sandbox/compare`, { waitUntil: 'domcontentloaded' });
-      let anchor = await waitAny(page, ['main'], STEP_TIMEOUT);
+      /*
+       * /sandbox/compare 是懒加载路由。等 'main' 恒真（外壳自带），
+       * 必须等懒加载 chunk 落地。
+       */
+      let ready = await waitForRouteReady(page);
+      let anchor = ready ? 'main' : null;
       expectTrue('直接访问 /sandbox/compare 渲染', anchor !== null);
 
       // 关键：刷新一次。base 配错时刷新会白屏（HANDOVER §4.4）
       await page.reload({ waitUntil: 'domcontentloaded' });
-      anchor = await waitAny(page, ['main'], STEP_TIMEOUT);
+      ready = await waitForRouteReady(page);
+      anchor = ready ? 'main' : null;
       expectTrue('刷新后仍渲染（SPA fallback 生效）', anchor !== null);
 
       const length = await bodyLength(page);
@@ -1809,7 +1948,14 @@ const scenarios: Scenario[] = [
         page.on('console', listener);
         try {
           await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded', timeout: STEP_TIMEOUT });
-          const anchor = await waitAny(page, ['main', 'h1', '[data-testid]'], 10_000);
+          /*
+           * 这个循环遍历的是全部路由，其中多数是懒加载的。
+           * `waitAny(['main','h1','[data-testid]'])` 里的 main 由外壳提供，
+           * 恒真 —— 于是「锚点存在」永远成立，只剩正文长度在兜底。
+           * 改为等懒加载真正落地，正文长度断言才有意义。
+           */
+          const routeReady = await waitForRouteReady(page, 10_000);
+          const anchor = routeReady ? 'main' : null;
           const length = await bodyLength(page);
           expectTrue(
             `${route} 渲染（有容器且正文 > 50 字）`,

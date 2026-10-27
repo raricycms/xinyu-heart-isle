@@ -163,8 +163,14 @@ import type { SandRendererProps, SandRendererHandle } from '@/sandbox/render/typ
 | `iso2d` | Canvas 2.5D 轴测（**默认**） | 常规 |
 | `three` | three.js 正交相机（**动态 import**） | 用户显式选择 |
 
-> 打包预算：`three` 必须落进独立 chunk，主包 **gzip ≤ 175KB**。
+> 打包预算（**以 VISION §5.9 L344 为准**）：首屏 JS **gzip ≤ 200KB**（不含 3D 路由），
+> `three` 必须落进独立 chunk 且 gzip ≤ 600KB。门禁：`npm run audit:budget`。
 > 渲染器实现文件见 `src/sandbox/render/**`（各渲染器自己一个文件）。
+>
+> 早期这里写的是「主包 ≤ 175KB」，那是拍脑袋定的、且**没有任何门禁在量**。
+> v2.0 实测首屏 145.8KB，看起来"达标"，但把 8 个页面全静态塞进了主包
+> （其中 `ScaleRunPage` + `scales/data` 就占 55KB 源码）——再来两三个页面
+> 就会越线，而所有测试仍然全绿。数字统一到 VISION，并且真的量起来。
 
 ### 3.6 可用 CSS 类（摘要）
 
@@ -242,7 +248,9 @@ import { coerceSession, migrateSnapshot } from '@/format/migrate';
 
 - `npx tsc -b --noEmit` 必须零错误
 - `npx vitest run` 必须全绿
-- `npx vite build` 必须通过，且主包 gzip ≤ 175KB（`three` 必须是独立 chunk）
+- `npx vite build` 必须通过，且首屏 JS gzip ≤ 200KB（`three` 必须是独立 chunk）
+- **`src/pages/SafetyPage.tsx` 必须保持静态导入**，不得改成路由懒加载
+  （危机页不允许有加载延迟，见 VISION §5.6「≤2 次点击可达」）
 - 不修改 `src/App.tsx`、`src/lib/**`、`src/components/**`、`src/styles/global.css`、
   `src/styles/app.css`、`src/sandbox/{events,useSandboxSession,symbols,surfaceCodec,surfaceState,surfaceOps}.ts`、
   `src/format/**`（除非任务单明确授权）
@@ -255,11 +263,19 @@ import { coerceSession, migrateSnapshot } from '@/format/migrate';
 > 一直抛 `MODULE_NOT_FOUND`，几个月无人发现，因为没人跑它。
 > 现在 `npm run check` 会把下面每一条都串起来跑一遍。
 > 新增一行预算时，请同时确认对应的命令存在、且**能失败**（改坏阈值应该红）。
+>
+> **2026-10 补记**：「首屏 JS」这一行原本写 `npx vite build 输出（实测 ~140KB）`。
+> 但 `vite build` 只打印文件列表，**从不判定**，而且「主包」的定义模糊到
+> 可以随便解释。结果就是：8 个页面全静态塞进主包，没人觉得有问题，
+> 因为没人在看。现在有 `npm run audit:budget` 真的沿着静态 import 链
+> 算一遍，并且带自测（`audit:budget:self-test`）证明它在该红时会红。
 
 | 项 | 预算 | 验证方式 |
 | --- | --- | --- |
-| 主包 gzip | ≤ 175KB | `npx vite build` 输出（实测 ~140KB） |
-| `three` 不进主包 | 独立 chunk，首屏不请求 | E2E 请求监听 |
+| 首屏 JS gzip | ≤ 200KB（判失败线 210KB） | `npm run audit:budget`（实测 112.4KB；沿 index 的**静态** import 链累加，懒加载 chunk 不计） |
+| `three` 不进主包 | 独立 chunk，首屏不请求 | `npm run audit:budget` + E2E 请求监听（双保险） |
+| `three` chunk gzip | ≤ 600KB | `npm run audit:budget`（实测 130.8KB） |
+| 危机页零延迟 | `SafetyPage` 不得被拆包 | `npm run audit:budget` 检查 dist 里没有 `SafetyPage-*.js` |
 | 沙盘首屏可交互 | ≤ 1.5s（本地） | `npm run perf`（实测常态 408–456ms；**判失败线 2× 预算 = 3000ms**，超预算但未达失败线会打 `⚠` 告警） |
 | 单次笔刷（128×96） | ≤ 4ms | 单元测试里 `performance.now()` 断言 |
 | 单次 `surface.stroke` 编码载荷 | ≤ 8KB | 单元测试（实测 ~430–750B） |
@@ -520,3 +536,99 @@ seed 0 → 下标 [0, 4, 0] → 去重后只剩 2 条
 
 > **这一类的教训：文件存在、有测试、被导出，都不等于功能可用。**
 > 只有"从用户入口能走到"才算。
+
+### 9.6 第七类幽灵：恒真等待，和没人量的预算
+
+这两条是同一天发现的，成因却完全相反 —— 一个**太像门禁**，一个**根本不像**。
+
+#### 9.6.1 恒真等待：等一个永远存在的元素
+
+v2.0 为了首屏体积把 8 个页面改成路由懒加载后，E2E 立刻红了 5 条：
+
+```
+✗ 语言切换按钮存在 — zh=false en=false
+✗ 说明页说明计分口径 — 未找到计分说明
+✗ 存在「开始作答」按钮 — 索引 -1
+```
+
+原因不是产品坏了，而是**等待写错了**：
+
+```ts
+await page.goto(`${BASE}/about`);
+await waitAny(page, ['main', 'h1']);          // ← 立刻返回
+const btn = await page.$('[data-testid="locale-zh"]');  // ← null
+```
+
+`AppShell` 自己渲染 `<main id="main">`（L114），所以**任何页面**一挂载
+`main` 就为真。`waitAny` 等的是一个恒真条件 —— 等于**没等**，
+断言时序全靠「chunk 下载得快不快」。
+
+这类错误的危险在于它是**双向**的：
+
+- 平时 chunk 快，测试绿 —— 于是没人发现等待是假的。
+- CI 稍慢或网络抖动，测试红 —— 于是被当成产品 bug 去查，浪费一天。
+
+而且它跟 §9.3、§9.5 一样，**删掉被测对象后门禁依然绿**：
+把 `/about` 的语言按钮整个删掉，`waitAny(['main','h1'])` 照样通过。
+
+**修法**：让「加载中」这个状态本身可观测。`RouteFallback` 加
+`data-testid="route-loading"`，等待判据改成「这个标记消失了没」：
+
+```ts
+await page.waitForFunction(
+  () => document.querySelector('[data-testid="route-loading"]') === null,
+);
+```
+
+为什么不直接等目标按钮？因为那是**两件事**：等懒加载完成（通用）
+和等页面内容正确（各页面自己的断言）。混在一起时，"按钮没出来"
+无法区分是加载慢还是功能坏了。
+
+**变异验证（这一步不能省）**：把 `lazyEl` 改成永远渲染骨架，
+模拟懒加载卡死 —— 结果 **45 项失败、4 个场景崩溃**。
+如果这时 E2E 还是绿的，说明等待机制根本没生效。
+
+#### 9.6.2 没人量的预算
+
+`docs/VISION.md` L344 写着「首屏 JS ≤ 200KB gzip」，
+`docs/CONTRACT.md` §7 写着「主包 gzip ≤ 175KB」，
+两处数字都不一致，而**没有任何命令在量**。§7 表格的"验证方式"一列
+写的是 `npx vite build 输出（实测 ~140KB）` —— `vite build` 只打印文件
+列表，从不判定，更不会因为超了而失败。
+
+结果是：8 个页面全静态塞进主包，其中 `ScaleRunPage` + `scales/data`
+就占 55KB 源码。实测首屏 145.8KB，**"离 175KB 还有 30KB，看起来挺安全"**
+—— 其实再塞两个页面就越线，而所有测试仍然全绿。
+
+更隐蔽的是「主包」这个词本身可以随便解释：只算 `index-*.js` 是
+142.5KB，算上静态依赖链的 `jsx-runtime` 是 145.8KB，
+把所有 chunk 相加是 211KB。**一个定义模糊的指标等于没有指标。**
+
+**修法**：
+
+1. 口径写死：**首屏 JS = 沿 `index` 静态 import 链能走到的所有 chunk
+   的 gzip 之和**。`import("./x.js")` / `__vitePreload` 是动态加载，不算。
+2. 加 `scripts/audit/bundle-budget.mjs`，四条判据：首屏 ≤ 200KB、
+   three ≤ 600KB、three 不在主包、**`SafetyPage` 不得被拆包**。
+   判失败线放到 210KB（留 5% 抖动），因为卡在 200.0KB 会让无关的
+   依赖升级打红门禁，而真正要拦的是「又塞了一个页面」这种几十 KB 的量级。
+3. 加 `audit:budget:self-test`：在临时目录造假的 dist，验证
+   **超线时会红**。这条自测自己就抓到三个 bug（见脚本注释）：
+   相对路径写死、压缩率估错两次、LCG 溢出退化成短周期。
+
+> **这一类的教训：写在文档里但没人量的预算，不是预算，是愿望。**
+> 而且判断一个指标有没有用，先看它**能不能红**；
+> 不能红的指标，绿得再久也不说明任何事。
+
+#### 9.6.3 顺带守住的一条线
+
+拆分时很容易顺手把所有页面都懒加载 —— 那时体积数字更好看。
+但 `/safety` 是危机页，CONTRACT §5 要求「任何页面 ≤2 次点击可达」。
+给它加一层网络往返，等于在**最需要它的时刻**让它变慢甚至失败
+（弱网/离线）。
+
+所以 `audit:budget` 里有一条看起来跟体积无关的判据：
+**`SafetyPage` 不得被拆包**。变异验证过：把它改成懒加载，
+首屏从 112.4KB 降到 105.8KB（数字更好看），但门禁红。
+
+> **体积预算不是最高优先级。安全红线不能拿性能指标交换。**
