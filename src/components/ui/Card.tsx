@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
 import { cx } from '@/lib/utils';
 
 export function Card({
@@ -21,22 +20,6 @@ export function Card({
     >
       {children}
     </div>
-  );
-}
-
-export function CardLink({
-  to,
-  children,
-  className,
-}: {
-  to: string;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <Link to={to} className={cx('card', 'card--link', className)}>
-      {children}
-    </Link>
   );
 }
 

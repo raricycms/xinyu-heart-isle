@@ -100,7 +100,13 @@ export const zhCN: Record<string, string> = {
   'sandbox.scene.void': '虚空',
 
   /* -------------------------------- 阶段 ---------------------------------- */
-  'sandbox.phase': '阶段',
+  /*
+   * 注意：没有裸键 `sandbox.phase`（「阶段」这个标题字样）。
+   *
+   * 它曾经存在，但唯一渲染它的是已删除的死组件 `PromptPanel`。
+   * 产品里的阶段是动态拼出来的 `sandbox.phase.${phase}`，
+   * 从不单独显示「阶段」二字 —— 留着会让下一个人以为有分组标题。
+   */
   'sandbox.phase.intro': '开始',
   'sandbox.phase.create': '摆沙',
   'sandbox.phase.reflect': '看',

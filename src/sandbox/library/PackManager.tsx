@@ -19,7 +19,15 @@ import '@/styles/sandbox-library.css';
  * 3. 删除需要二次确认。
  *
  * `onChanged` 让上层在包变动后刷新沙具列表（本组件也直接读 `usePacks`）。
- */
+ 
+ *
+ * ⚠️ 本组件**尚未接入任何页面**（v2.0 对账确认）。
+ *    「沙具包规范」在 VISION §5.8 属于 v3.0 生态层，
+ *    且明确写了「先留接口，不承诺 API 稳定」。
+ *    这里的 `importPack` / `validatePack` 等函数是 `packs.ts` 的
+ *    唯一产品调用方，删掉会让整条链路变成死代码 —— 所以保留。
+ *    接入方式：在沙具库顶部加一个「导入沙具包」按钮挂载本组件。
+*/
 
 export interface PackManagerProps {
   /** 包被安装/卸载后的回调（可选） */

@@ -647,13 +647,43 @@ export const PROMPT_GROUPS: Record<PromptStage, string[]> = {
 /** 兼容 v1：保留旧常量名（= 摆放中那一组） */
 export const EXPLORATION_PROMPTS: string[] = PROMPT_GROUPS.during;
 
-/** 取 n 个提示，基于种子保证同一次渲染内稳定 */
+/** 两数的最大公约数（用于挑选与词库长度互质的步长） */
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
+}
+
+/**
+ * 取 n 个提示，基于种子保证同一次渲染内稳定。
+ *
+ * ── 这里修过一个真实 bug ────────────────────────────────────────
+ *
+ * 原公式是 `(seed * 7 + i * 3 + i) % total`，注意 `i * 3 + i` 就是 `i * 4`。
+ * `after` 组有 8 条，而 4 与 8 不互质 —— 于是 i=0 和 i=2 取到同一个下标：
+ *
+ *     seed 0 → 下标 [0, 4, 0] → 去重后只剩 **2 条**
+ *
+ * 结果是「结束后」这一档点「换一批」永远只有 2 句话，而不是 3 句。
+ * 因为数组长度不是 0、页面也不报错，任何门禁都看不出问题 ——
+ * 它是被「三个阶段都能取到 3 条」这条断言抓到的。
+ *
+ * 修法：步长取与 total **互质**的数。若步长与 total 互质，
+ * 则 i ↦ (偏移 + i*步长) mod total 在 i < total 时必然两两不同，
+ * 去重以后再也不会丢条目。total 变化时自动重算，不写死。
+ */
 export function pickPrompts(seed: number, count = 3, stage: PromptStage = 'during'): string[] {
   const pool = PROMPT_GROUPS[stage];
   const total = pool.length;
+  if (total === 0 || count <= 0) return [];
+
+  // 从 3 开始找一个与 total 互质的步长（3 对多数长度都互质）
+  let step = 3;
+  while (step < total && gcd(step, total) !== 1) step += 1;
+  if (gcd(step, total) !== 1) step = 1; // total <= 2 时退回顺序取
+
+  const start = Math.abs(Math.trunc(seed)) * 7;
   const picked: string[] = [];
   for (let i = 0; i < count && i < total; i += 1) {
-    picked.push(pool[(seed * 7 + i * 3 + i) % total]);
+    picked.push(pool[(start + i * step) % total] as string);
   }
   return [...new Set(picked)];
 }

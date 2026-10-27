@@ -1,13 +1,11 @@
 /**
  * 心屿 · 沙具库模块出口
  *
- * Lead 集成时 `import { SymbolTray, PromptPanel, AffectPicker, PackManager } from '@/sandbox/library'`
- * 即可（样式 `src/styles/sandbox-library.css` 由入口组件统一引入一次）。
+ * 产品实际使用的只有 `SymbolTray`（沙具库主界面）和 `usePackImageMap`（图片映射）。
+ * 其余是供外部按 `docs/FORMAT.md` 接入的公共 API（`PackManager` 等）。
  */
 
 export { SymbolTray, glyphOf, type SymbolTrayProps } from './SymbolTray';
-export { PromptPanel, type PromptPanelProps } from './PromptPanel';
-export { AffectPicker, type AffectPickerProps } from './AffectPicker';
 export { PackManager, type PackManagerProps } from './PackManager';
 
 export {
@@ -21,13 +19,6 @@ export {
   expandTokens,
 } from './search';
 
-export {
-  PROMPT_STAGES,
-  promptPoolSize,
-  promptsForView,
-  nextSeed,
-  type PromptStage,
-} from './prompts';
 
 export {
   SYMBOL_PACK_FORMAT,

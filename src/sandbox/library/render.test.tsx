@@ -13,8 +13,6 @@
 
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { AffectPicker } from './AffectPicker';
-import { PromptPanel } from './PromptPanel';
 import { SymbolTray } from './SymbolTray';
 
 describe('SymbolTray 渲染', () => {
@@ -49,60 +47,3 @@ describe('SymbolTray 渲染', () => {
   });
 });
 
-describe('PromptPanel 渲染', () => {
-  it('渲染三个阶段 tabs 与「换一组」，默认取 3 条', () => {
-    const html = renderToStaticMarkup(<PromptPanel />);
-    expect(html).toContain('开始前');
-    expect(html).toContain('摆放中');
-    expect(html).toContain('结束后');
-    expect(html).toContain('换一组');
-    expect((html.match(/class="prompt-list__toggle"/g) ?? []).length).toBe(3);
-  });
-
-  it('受控 stage / seed 决定展示内容（同参数同输出，换 seed 变内容）', () => {
-    const a = renderToStaticMarkup(<PromptPanel stage="before" seed={1} />);
-    const b = renderToStaticMarkup(<PromptPanel stage="before" seed={1} />);
-    const c = renderToStaticMarkup(<PromptPanel stage="before" seed={9} />);
-    expect(a).toBe(b);
-    expect(a).not.toBe(c);
-  });
-
-  it('含「不做解读」的伦理说明', () => {
-    const html = renderToStaticMarkup(<PromptPanel />);
-    expect(html).toContain('不会解释你的沙盘');
-  });
-
-  it('showStages=false 时不渲染阶段 tabs', () => {
-    const html = renderToStaticMarkup(<PromptPanel showStages={false} />);
-    expect(html).not.toContain('开始前');
-  });
-});
-
-describe('AffectPicker 渲染', () => {
-  it('渲染 13 个标签，全部 aria-pressed=false 起始', () => {
-    const html = renderToStaticMarkup(<AffectPicker value={[]} onChange={() => {}} />);
-    const chips = html.match(/class="affect-picker__chip"[^>]*aria-pressed="(true|false)"/g) ?? [];
-    expect(chips).toHaveLength(13);
-    expect(chips.every((chip) => chip.includes('aria-pressed="false"'))).toBe(true);
-  });
-
-  it('已选标签体现为 aria-pressed=true，并按词表顺序展示', () => {
-    const html = renderToStaticMarkup(<AffectPicker value={['温暖', '害怕']} onChange={() => {}} />);
-    expect(html).toContain('aria-pressed="true"');
-    expect(html).toContain('已选 2 个：害怕、温暖');
-  });
-
-  it('readOnly 时全部禁用且不给「清空」', () => {
-    const html = renderToStaticMarkup(
-      <AffectPicker value={['安全']} onChange={() => {}} readOnly />,
-    );
-    expect(html).toContain('disabled');
-    expect(html).not.toContain('清空');
-  });
-
-  it('顶部提示写明「只用来整理，不做任何分析」', () => {
-    const html = renderToStaticMarkup(<AffectPicker value={[]} onChange={() => {}} subject="树" />);
-    expect(html).toContain('给「树」贴感受');
-    expect(html).toContain('只用来整理，不做任何分析');
-  });
-});

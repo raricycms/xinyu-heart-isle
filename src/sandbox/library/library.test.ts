@@ -34,7 +34,17 @@ import {
   subcategoriesOf,
   toggleFavorite,
 } from './search';
-import { promptPoolSize, promptsForView, PROMPT_STAGES, nextSeed } from './prompts';
+/*
+ * 引导语断言改指向 `@/sandbox/symbols` 的 PROMPT_GROUPS。
+ *
+ * 原来测的是 `library/prompts.ts` —— 那是与 symbols.ts 并存的**第二套**
+ * 引导语实现，被已删除的死组件 `PromptPanel` 使用。产品实际用的是
+ * SidePanels.tsx 的 `PromptCard` → `promptsForStage` → PROMPT_GROUPS。
+ *
+ * 断言内容不变（三阶段、pool ≥5、无解读式措辞），因为这三条是红线
+ * （CONTRACT §5.6 不做解读），必须继续守着 —— 只是改守真正跑的那份代码。
+ */
+import { PROMPT_GROUPS, promptsForStage } from '@/sandbox/symbols';
 import {
   MAX_PACK_BYTES,
   MAX_PACK_SYMBOLS,
@@ -288,30 +298,34 @@ describe('分类过滤与分节', () => {
 
 describe('引导语', () => {
   it('三个阶段都有内容，且都能取到指定条数', () => {
-    expect(PROMPT_STAGES).toHaveLength(3);
-    for (const stage of PROMPT_STAGES) {
-      expect(promptPoolSize(stage)).toBeGreaterThanOrEqual(5);
-      const picked = promptsForView(stage, 3, 3);
+    const stages: PromptStage[] = ['before', 'during', 'after'];
+    for (const stage of stages) {
+      /* 每层至少 5 条：少于 5 条时「换一批」会反复撞到同几句 */
+      expect(PROMPT_GROUPS[stage].length).toBeGreaterThanOrEqual(5);
+      const picked = promptsForStage(stage, 3, 3);
       expect(picked).toHaveLength(3);
       expect(new Set(picked).size).toBe(3);
     }
   });
 
   it('同一 seed 结果稳定；换 seed 后内容会变', () => {
-    expect(promptsForView('during', 5, 3)).toEqual(promptsForView('during', 5, 3));
-    const a = promptsForView('during', 0, 3).join('|');
-    const b = promptsForView('during', nextSeed(0), 3).join('|');
+    expect(promptsForStage('during', 5, 3)).toEqual(promptsForStage('during', 5, 3));
+    const a = promptsForStage('during', 0, 3).join('|');
+    const b = promptsForStage('during', 7, 3).join('|');
     expect(a).not.toBe(b);
   });
 
+  /*
+   * 这条守的是红线（CONTRACT §5.6「不做解读」）。
+   * 遍历整个词表而不是抽样：种子只影响取哪几条，直接扫全量更彻底。
+   */
   it('引导语不含解读式措辞（不出现「代表你」「说明你」「你有」）', () => {
     const forbidden = ['代表你', '说明你', '你有抑郁', '诊断', '应该'];
-    for (const stage of PROMPT_STAGES as PromptStage[]) {
-      for (let seed = 0; seed < 20; seed += 1) {
-        for (const prompt of promptsForView(stage, seed, 5)) {
-          for (const word of forbidden) {
-            expect(prompt.includes(word)).toBe(false);
-          }
+    const stages: PromptStage[] = ['before', 'during', 'after'];
+    for (const stage of stages) {
+      for (const prompt of PROMPT_GROUPS[stage]) {
+        for (const word of forbidden) {
+          expect(prompt.includes(word)).toBe(false);
         }
       }
     }

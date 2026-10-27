@@ -87,7 +87,12 @@ export const en: Record<string, string> = {
   'sandbox.scene.room': 'Room',
   'sandbox.scene.void': 'Void',
 
-  'sandbox.phase': 'Phase',
+  /*
+   * No bare `sandbox.phase` key: the only consumer was the deleted
+   * dead component `PromptPanel`. Product code builds the key
+   * dynamically as `sandbox.phase.${phase}` and never renders the
+   * group title alone.
+   */
   'sandbox.phase.intro': 'Begin',
   'sandbox.phase.create': 'Create',
   'sandbox.phase.reflect': 'Look',
