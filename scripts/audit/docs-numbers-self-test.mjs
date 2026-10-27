@@ -41,7 +41,21 @@ function check(name, ok, detail) {
 {
   const r = runAudit();
   check('当前仓库一致时退出 0', r.code === 0, 'code=' + r.code + ' ' + r.out.slice(-200));
-  check('输出「全部 5 项」', /全部 5 项/.test(r.out), r.out.slice(-120));
+
+  /*
+   * 这里曾经写死「全部 5 项」。后来给 docs-numbers 加了第 6 项检查
+   * （i18n 键数），这条自测就红了 —— 而它红得毫无意义：
+   * 产品代码和文档都没问题，只是审计多加了一项。
+   *
+   * 教训：**自测也不该把"项数"写死**。它要断言的是"审计报出了
+   * 全部检查且没有不一致"，不是"恰好 5 项"。
+   *
+   * 现在断言两件事：
+   *   1. 输出里说"全部 N 项…一致"，N 是任意正整数
+   *   2. 每一项都以 ✓ 开头（不能有 ✗ 混在里面）
+   */
+  check('输出「全部 N 项…一致」', /全部 \d+ 项文档数字与代码一致/.test(r.out), r.out.slice(-150));
+  check('  没有任何 ✗ 行', !/^\s*✗/m.test(r.out), r.out.slice(-200));
 }
 
 /* ── 用例 2：删一个沙具 → 必须红 ─────────────────────────────── */
@@ -119,7 +133,44 @@ function check(name, ok, detail) {
   }
 }
 
-/* ── 用例 5：恢复后必须重新变绿 ──────────────────────────────── */
+/* ── 用例 6：文档里的「自测项数」漂了必须被抓 ────────────────── */
+/*
+ * 第三种「文档数字」幽灵：不是常量，而是**另一个脚本的输出**。
+ *
+ * 文档写「52 项自测」，自测后来加了几条，文档没人改。
+ * 它不在 CLAIMS 里，因为要拿到真实项数得把那个自测跑一遍（几十秒），
+ * 而 `audit:docs` 是秒级门禁。
+ *
+ * 所以判据是静态近似：数 check() 调用数，文档数字不得明显小于它。
+ */
+{
+  const VISION = 'docs/VISION.md';
+  const originalVision = readFileSync(VISION, 'utf8');
+
+  check('VISION 里确实写了自测项数（否则这条检查是空的）',
+    /validate-pack-self-test\.mjs`\s*\d+\s*项/.test(originalVision));
+
+  /* 把 52 改成 10，制造明显漂移 */
+  const mutated = originalVision.replace(
+    /(validate-pack-self-test\.mjs`\s*)\d+(\s*项)/,
+    '$110$2',
+  );
+  check('变异点已定位', mutated !== originalVision);
+
+  try {
+    writeFileSync(VISION, mutated, 'utf8');
+    const r = runAudit();
+    check('漂移后审计退出 1', r.code === 1, 'code=' + r.code);
+    check('  报出文档写的数字', r.out.includes('「10 项」'), r.out.slice(-300));
+    check('  报出实际的 check() 数', /个 check\(\) 调用/.test(r.out), r.out.slice(-300));
+  } finally {
+    writeFileSync(VISION, originalVision, 'utf8');
+  }
+
+  check('还原后 VISION 内容完全一致', readFileSync(VISION, 'utf8') === originalVision);
+}
+
+/* ── 用例 7：恢复后必须重新变绿 ──────────────────────────────── */
 {
   const r = runAudit();
   check('变异全部还原后重新通过', r.code === 0, 'code=' + r.code + ' ' + r.out.slice(-150));

@@ -44,6 +44,15 @@ const CLAIMS = {
 
   /* VISION §1.2 D3：「事件流」；ROADMAP v2.0「19 种事件」 */
   eventKindCount: { value: 19, source: 'ROADMAP v2.0' },
+
+  /*
+   * VISION §5.8：「沙盘模块全量双语（175 键 × 2）」。
+   *
+   * 这个数字漂过一次：文档写 166，代码里实际是 175，
+   * 而当时没有任何门禁覆盖它 —— 属于典型的「文档里的数字」幽灵
+   * （CONTRACT §9.7）。补进这张表的原因就是让它以后不能再漂。
+   */
+  i18nKeyCount: { value: 175, source: 'VISION §5.8' },
 };
 
 /* ── 从代码里数 ────────────────────────────────────────────────── */
@@ -97,6 +106,19 @@ if (eventUnionStart !== -1) {
 }
 const actualEventKindCount = [...eventUnionText.matchAll(/kind:\s*'([a-z.]+)'/g)].length;
 
+/*
+ * i18n 键数：数 zh-CN.ts 字典体里形如 `  'a.b': ...` 的行。
+ *
+ * 为什么只数 zh-CN 一侧：两侧键集合必须完全相同，那是
+ * `i18n-dead-keys.mjs` 的职责（它做双向比对）。这里只关心
+ * 「文档里写的那个数字」对不对。
+ */
+const zhSrc = readFileSync('src/i18n/zh-CN.ts', 'utf8');
+const zhDictMatch = zhSrc.match(/=\s*\{([\s\S]*?)\n\};/);
+const actualI18nKeyCount = zhDictMatch
+  ? (zhDictMatch[1].match(/^\s{2}'[^']+'\s*:/gm) ?? []).length
+  : 0;
+
 /* ── 比对 ──────────────────────────────────────────────────────── */
 
 const checks = [
@@ -105,6 +127,7 @@ const checks = [
   ['大类数量', CLAIMS.categoryCount, actualCategoryCount],
   ['笔刷数量', CLAIMS.brushCount, actualBrushCount],
   ['事件种类', CLAIMS.eventKindCount, actualEventKindCount],
+  ['i18n 键数', CLAIMS.i18nKeyCount, actualI18nKeyCount],
 ];
 
 console.log('文档数字一致性审计（docs/VISION.md §1.2 评分卡）');
@@ -131,6 +154,110 @@ if (failures > 0) {
   console.error('');
   console.error('  不要只改本脚本的数字 —— 那样只是把矛盾藏起来。');
   process.exit(1);
+}
+
+/* ── 文档里引用的「自测项数」───────────────────────────────────── */
+/*
+ * 这是上面「文档数字」的第三种形态，也是最阴的一种。
+ *
+ * 前两种是「固定的事实」（327 个沙具、19 种事件）—— 它们写在 CLAIMS 里，
+ * 代码一变就红。
+ *
+ * 而这第三种是「动态的计数」：文档写「44 项自测」，自测脚本后来加到 52 项，
+ * 文档没人改。它不在 CLAIMS 里，因为它不是从代码里数出来的常量，
+ * 而是**另一个脚本的输出**。
+ *
+ * 为什么不直接跑那个脚本取数字：自测要几十秒（会启动 Chrome、写临时文件），
+ * 而 `audit:docs` 是秒级的门禁。让它变慢的直接后果是没人愿意跑它。
+ *
+ * 所以改用静态近似：数自测脚本里 `check(` 的调用点。
+ * 它不是精确的运行期计数（循环里跑 3 次只算 1 个 check），
+ * 但它对「数字漂了」这个信号足够敏感 —— 这也是我们要的。
+ *
+ * ── 反过来说 ────────────────────────────────────────────────────
+ * 这条检查有个已知的局限：如果 `check()` 写在循环里，静态计数会**少于**
+ * 实际项数。所以判据不是「必须相等」，而是「文档里的数字必须 &&
+ * 静态计数相差不超过 3」。超过就认为漂了。
+ */
+const SELF_TEST_CLAIMS = [
+  /* [文档路径, 正则里的数字捕获组序号, 自测脚本, 允许的静态误差] */
+  { doc: 'docs/VISION.md', script: 'scripts/validate-pack.ts', selfTest: 'scripts/audit/validate-pack-self-test.mjs' },
+];
+
+function countStaticChecks(file) {
+  try {
+    const src = readFileSync(file, 'utf8');
+    /* 数 `check('...'` 或 `check(` 出现在行首缩进后的调用 */
+    return (src.match(/^\s*check\(/gm) ?? []).length;
+  } catch {
+    return -1;
+  }
+}
+
+/*
+ * 目前 VISION 里已经不再写具体项数（改成指向命令名），
+ * 所以这条检查主要防的是"未来有人又把数字写回去、然后漂掉"。
+ *
+ * 只有当文档里真的出现了「<自测脚本名> … N 项」这种表述时才检查。
+ */
+let selfTestClaimsChecked = 0;
+for (const { doc, selfTest } of SELF_TEST_CLAIMS) {
+  let docText;
+  try {
+    docText = readFileSync(doc, 'utf8');
+  } catch {
+    continue;
+  }
+
+  /*
+   * 匹配形如「`npm run validate:pack:self-test` … 44 项」
+   * 或「… + 44 项自测」，要求同一段落里既有脚本名又有项数。
+   */
+  const basename = selfTest.split('/').pop();
+  const idx = docText.indexOf(basename);
+  if (idx === -1) continue;
+
+  /* 在提到该脚本的段落里找「N 项」 */
+  const paraStart = docText.lastIndexOf('\n\n', idx);
+  const paraEnd = docText.indexOf('\n\n', idx);
+  const para = docText.slice(paraStart === -1 ? 0 : paraStart, paraEnd === -1 ? docText.length : paraEnd);
+  const claimMatch = para.match(/(\d+)\s*项/);
+  if (!claimMatch) continue;
+
+  const claimed = Number(claimMatch[1]);
+  const staticCount = countStaticChecks(selfTest);
+  selfTestClaimsChecked += 1;
+
+  /*
+   * 静态计数通常 <= 运行期项数（循环会重复执行），
+   * 所以断言「文档数字 >= 静态计数 - 3」且「文档数字 <= 静态计数 + 3」
+   * 太严了。改成：文档数字不得**小于**静态计数的 80%，
+   * 否则说明文档明显漏写了。
+   *
+   * 这条规则故意宽松 —— 宁可漏报也不要误报。
+   * 一次误报就足以让人不再相信门禁（见 docs/TESTING.md §8）。
+   */
+  const ok = staticCount > 0 && claimed >= Math.floor(staticCount * 0.8);
+  if (!ok) {
+    failures += 1;
+    console.error(
+      '  ✗ ' + doc + ' 写「' + claimed + ' 项」，但 ' + basename + ' 里有 ' +
+        staticCount + ' 个 check() 调用',
+    );
+    console.error('    文档里的项数明显小于脚本实际检查数，说明漂了。');
+  } else {
+    console.log(
+      '  ✓ 「' + claimed + ' 项」与 ' + basename + ' 的 ' + staticCount + ' 个 check() 大致吻合',
+    );
+  }
+}
+
+if (selfTestClaimsChecked > 0) {
+  console.log('');
+  if (failures > 0) {
+    console.error('✗ 文档里的自测项数已经漂了');
+    process.exit(1);
+  }
 }
 
 /* ── 文档里的路径与命令 ────────────────────────────────────────── */
