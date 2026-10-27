@@ -29,9 +29,11 @@
     "audit:css:self-test": "node scripts/audit/css-tokens-self-test.mjs",
     "audit:budget": "node scripts/audit/bundle-budget.mjs",
     "audit:budget:self-test": "node scripts/audit/bundle-budget-self-test.mjs",
+    "audit:docs": "node scripts/audit/docs-numbers.mjs",
+    "audit:docs:self-test": "node scripts/audit/docs-numbers-self-test.mjs",
     "perf": "node --experimental-strip-types scripts/audit/perf.ts",
     "validate": "node --experimental-strip-types scripts/validate-session.ts",
-    "check": "npm run typecheck:all && npm run audit:ghost && npm run audit:i18n && npm run audit:css && npm run build && npm run audit:budget && npm run test && npm run validate -- samples/example.sandplay.json && npm run e2e && npm run visual && npm run perf:render && npm run a11y && npm run perf"
+    "check": "npm run typecheck:all && npm run audit:ghost && npm run audit:i18n && npm run audit:css && npm run audit:docs && npm run build && npm run audit:budget && npm run test && npm run validate -- samples/example.sandplay.json && npm run e2e && npm run visual && npm run perf:render && npm run a11y && npm run perf"
   },
   "dependencies": {
     "react": "^19.3.1",

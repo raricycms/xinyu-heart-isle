@@ -1400,6 +1400,42 @@ v2.0 收尾时对账一次，结果是 81 处引用、27 个从未定义的 toke
 
 ---
 
+### 4.y 文档数字审计：`scripts/audit/docs-numbers.mjs`（`npm run audit:docs`）
+
+`docs/VISION.md` §1.2 的评分卡自述是「本文的核心工具」，
+里面写着一串具体数字：327 个沙具 / 24 个子类 / 6 大类 / 7 种笔刷 /
+19 种事件。它们是「v2.0 达成」这个结论的**全部支撑**。
+
+问题是没有任何机制保证这些数字和代码一致：
+
+- 删掉 50 个沙具 → VISION 依然写着 327
+- 改成 6 种笔刷 → 评分卡依然写 7
+- **所有测试仍然绿**，因为测试测代码，不测文档
+
+这类"文档层幽灵"比代码层的更难发现：代码层的错误可以用「把被测对象
+删掉看门禁绿不绿」发现，文档层的错误**没有任何运行时痕迹**。
+
+#### 设计取舍
+
+| 选择 | 理由 |
+| --- | --- |
+| **不解析 Markdown 表格** | 表格结构太脆（多一个空格就失效），最后会退化成"解析失败就跳过"。改为把文档声称的数字写成脚本里的显式常量 + 出处行号 |
+| 两边互相钉住 | 代码变了脚本红 → 想改绿必须看文档；文档变了脚本也得改 → 改时必须看代码 |
+| **自测用真仓库 + 定向变异** | 不造假仓库（复制整个 `src` 太慢）。删一个沙具必须红且报 326；加一种事件必须红且报 20；还原必须重新绿 |
+
+#### 写这个脚本时踩的坑
+
+事件种类第一版用 `EventPayload = ([\s\S]{0,2000}?);` 匹配，
+但联合类型第一个成员内部就有分号
+（`{ kind: 'item.add'; item: SandboxItem }`），非贪婪匹配在那里就截断了 ——
+**只数到 1 个**，然后报出「文档 19，代码 1」。
+
+如果我当时信了这个数字去改文档，就会把 19 改成 1，把正确的文档改坏。
+
+> **当一个审计器给出反直觉的数字时，先怀疑审计器。**
+
+---
+
 ## 5. 棘轮基线（a11y）
 
 > **现状（v2.0）**：基线已收窄到 **`entries: []`**，当前审计 **critical 0 / warning 0**。
@@ -1560,6 +1596,8 @@ jobs:
       - run: node scripts/audit/css-tokens-self-test.mjs
       - run: node scripts/audit/bundle-budget.mjs           # 首屏 ≤200KB gzip（CONTRACT §7）
       - run: node scripts/audit/bundle-budget-self-test.mjs # 体积门禁自己会红吗
+      - run: node scripts/audit/docs-numbers.mjs            # VISION 评分卡的数字与代码一致吗
+      - run: node scripts/audit/docs-numbers-self-test.mjs  # 数字审计自己会红吗
 
       # ---- 真浏览器门禁 ----
       - run: node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts
