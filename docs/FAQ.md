@@ -218,7 +218,7 @@ npm run dev
 npm run check
 ```
 
-22 个环节，全绿才算过。**注意 `npm run e2e` 不会自动构建** ——
+24 个环节，全绿才算过。**注意 `npm run e2e` 不会自动构建** ——
 它跑的是现有的 `dist/`，所以要先 `npx vite build`。
 
 细节见 [`CONTRIBUTING.md`](../CONTRIBUTING.md)。
