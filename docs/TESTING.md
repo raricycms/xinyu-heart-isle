@@ -1599,6 +1599,9 @@ jobs:
       - run: node scripts/audit/docs-numbers.mjs            # VISION 评分卡的数字与代码一致吗
       - run: node scripts/audit/docs-numbers-self-test.mjs  # 数字审计自己会红吗
 
+      # ---- 格式校验器（两份格式都要双向验证）----
+      - run: node scripts/audit/validate-pack-self-test.mjs # 沙具包校验器：好包过、坏包红、文档一致
+
       # ---- 真浏览器门禁 ----
       - run: node --experimental-strip-types --no-warnings scripts/e2e/smoke.ts
       - run: node scripts/audit/e2e-self-test.mjs          # 移动端断言有效

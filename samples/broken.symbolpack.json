@@ -1,0 +1,86 @@
+{
+  "// 说明": "这个包故意包含 10 类错误，用来验证校验器能逐条抓住。它不应该被安装。",
+  "// 注意": "每条错误尽量互不重叠，这样报出来的问题条数就等于错误个数，便于核对校验器有没有漏判。",
+  "format": "symbol-pack/v0",
+  "name": "",
+  "license": "unknown",
+  "symbols": [
+    {
+      "// 错误 1": "id 没有命名空间（缺 `.`），且不与任何内置 id 重名",
+      "id": "zzz-namespaceless",
+      "label": "无命名空间",
+      "subcategory": "nature-plant",
+      "glyph": "🍄"
+    },
+    {
+      "// 错误 2": "id 与内置沙具重名（内置库里有 tree）",
+      "id": "tree",
+      "label": "树",
+      "subcategory": "nature-plant",
+      "glyph": "🌳"
+    },
+    {
+      "// 错误 3": "包内 id 重复（与错误 1 那条相同 id）",
+      "id": "zzz-namespaceless",
+      "label": "重复 id",
+      "subcategory": "nature-plant",
+      "glyph": "🍄"
+    },
+    {
+      "// 错误 4": "subcategory 不是已知子类",
+      "id": "broken.alien",
+      "label": "外星物",
+      "subcategory": "nature-alien",
+      "glyph": "👽"
+    },
+    {
+      "// 错误 5": "category 与 subcategory 不一致（人物子类却声明为自然）",
+      "id": "broken.mismatch",
+      "label": "错位",
+      "category": "nature",
+      "subcategory": "person-adult",
+      "glyph": "🧑"
+    },
+    {
+      "// 错误 6": "既没有 glyph 也没有 image",
+      "id": "broken.empty",
+      "label": "空条目",
+      "subcategory": "nature-plant"
+    },
+    {
+      "// 错误 7": "image 是网络地址（禁止，数据不得离开本地）",
+      "id": "broken.remote",
+      "label": "网络图",
+      "subcategory": "nature-plant",
+      "image": "https://example.com/tree.png"
+    },
+    {
+      "// 错误 8": "glyph 太长（应只有一个字符/emoji，上限 16）",
+      "id": "broken.toolong",
+      "label": "长字形",
+      "subcategory": "nature-plant",
+      "glyph": "这是一个明显超过十六个字符上限的假字形用来看校验器会不会报"
+    },
+    {
+      "// 错误 9": "缺少 label",
+      "id": "broken.nolabel",
+      "subcategory": "nature-plant",
+      "glyph": "❓"
+    },
+    {
+      "// 错误 10": "tags 里有非字符串项",
+      "id": "broken.badtags",
+      "label": "坏标签",
+      "subcategory": "nature-plant",
+      "glyph": "🏷",
+      "tags": ["正常", 42]
+    },
+    {
+      "// 错误 11": "label 超长（上限 40 字）",
+      "id": "broken.longlabel",
+      "label": "很长很长的标签很长很长的标签很长很长的标签很长很长的标签很长很长的标签很长很长的标签很长很长的标签",
+      "subcategory": "nature-plant",
+      "glyph": "📛"
+    }
+  ]
+}

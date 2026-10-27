@@ -17,7 +17,7 @@
  */
 
 import type { BaseRecord, SandboxSymbolEntry, SymbolSubcategory } from '@/lib/types';
-import { readJSON, writeJSON } from '@/lib/storage';
+import { STORAGE_KEYS, readJSON, writeJSON } from '@/lib/storage';
 import {
   SYMBOLS,
   getSymbolById,
@@ -30,8 +30,19 @@ import {
 /*                                  常量定义                                   */
 /* -------------------------------------------------------------------------- */
 
-/** localStorage key（Lead 需写入 FORMAT.md） */
-export const SYMBOL_PACKS_STORAGE_KEY = 'xinyu.symbolPacks';
+/**
+ * localStorage key。
+ *
+ * 这里原来硬编码了字符串 `'xinyu.symbolPacks'`，同时在
+ * `src/lib/storage.ts` 的 `STORAGE_KEYS.symbolPacks` 里也有一份。
+ * 两处字面量一致，所以没出过问题 —— 但这是个**漂移隐患**：
+ * 哪天 `NAMESPACE` 改成别的，或者 key 名字微调，
+ * 只有一处会跟着变，另一处静默失效（读到的永远是空数组，
+ * 用户会以为"装的包丢了"，而没有任何报错）。
+ *
+ * 现在直接引用 `STORAGE_KEYS`，只有一处定义。
+ */
+export const SYMBOL_PACKS_STORAGE_KEY = STORAGE_KEYS.symbolPacks;
 
 /** 本模块的格式字面量 */
 export const SYMBOL_PACK_FORMAT = 'sandbox-symbol-pack/v1';

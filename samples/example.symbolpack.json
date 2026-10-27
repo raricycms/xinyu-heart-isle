@@ -1,0 +1,38 @@
+{
+  "format": "symbol-pack/v1",
+  "id": "example-nature",
+  "name": "示例 · 自然补遗",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "author": "心屿示例",
+  "description": "一个最小可用的沙具包，演示格式的每一个字段。所有条目都用 emoji 字形，不含图片，因此文件很小。",
+  "symbols": [
+    {
+      "id": "example-nature.mushroom",
+      "label": "蘑菇",
+      "labelEn": "Mushroom",
+      "category": "nature",
+      "subcategory": "nature-plant",
+      "glyph": "🍄",
+      "tags": ["菌", "林下", "小红帽"]
+    },
+    {
+      "id": "example-nature.fern",
+      "label": "蕨类",
+      "labelEn": "Fern",
+      "category": "nature",
+      "subcategory": "nature-plant",
+      "glyph": "🌿",
+      "tags": ["绿", "荫", "古老"]
+    },
+    {
+      "id": "example-nature.geode",
+      "label": "晶洞",
+      "labelEn": "Geode",
+      "category": "nature",
+      "subcategory": "nature-land",
+      "glyph": "💎",
+      "tags": ["石", "内里", "切开才知道"]
+    }
+  ]
+}
