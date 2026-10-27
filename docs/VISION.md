@@ -531,8 +531,13 @@ SandSession (数据)
 >    于是**方向键微调被提交成原地不动**。`tsc` 放行（少写参数合法）、
 >    547 条单测放行 —— 只有端到端按下方向键再读坐标才能发现。
 >    变异证据见 `scripts/audit/keyboard-self-test.mjs`。
->    但仍有限制：该流程**只能在 `dom2d` 渲染器下完成**，
->    默认的 `iso2d` 没有摆件的键盘操作入口（见 `CONTRACT.md` §7）。
+>    **v2.0 收尾已修复默认渲染器的这个缺口**：`iso2d` 原来只有
+>    `role="list"` 的只读文本，键盘用户能**听到**摆件但没法**操作**。
+>    现在升级为真正的按钮组（Tab 进入、方向键移动、Enter 选中），
+>    与 `dom2d` 键位完全一致，E2E `keyboard-flow` 场景 21 项断言
+>    钉住（含「焦点落在 BUTTON 上」「方向键真的改变了坐标」）。
+>    仍有的边界：可选 3D 渲染器 `three` 没有摆件键盘入口
+>    （非默认路径，`CONTRACT.md` §7 已标注）。
 > 3. **视觉回归有了门禁**，但**刻意不用基线图比对**（`scripts/visual-regression.mjs`）。
 >    基线图在这种项目里有三个硬伤：反锯齿在不同 Chrome / 显卡 / DPI 下
 >    差几个像素是常态，会把环境差异变成红灯，最后大家学会忽略它；
@@ -549,6 +554,15 @@ SandSession (数据)
 >    渲染成同一张图；以及 `launchPreview` 的 `distDir` 参数**只用来做
 >    存在性检查、从未传给 vite**，使所有变异测试实际都在测默认 `dist/`。
 >    两者都属于「绿得毫无意义」的典型。
+>    v2.0 收尾又补了一条相邻但不同的缺口：**白屏**。
+>    `scripts/audit/routes-health.mjs` 对 15 条路由做 135 项断言
+>    （桌面 105 + 移动端 30），检查 `<main>` 有内容、**真有尺寸**、
+>    计算样式可见、有可见子元素、无运行时错误。写它时被自己的变异
+>    验证红了一次 —— 第一版用 `main.innerText` 判白屏，而实测 Chrome
+>    对 `display:none` 的元素 `innerText` **仍有 37 字**（只有
+>    `visibility:hidden` 才是 0），于是"整块没显示"是绿的。
+>    这类「断言的形状对、但它验证的不是用户看到的东西」是最难发现的
+>    幽灵门禁。详见 `docs/TESTING.md` §6.2.1。
 >
 > **性能一行原来是虚标的 ✅**。要求写的是「首屏、**3D 路由、100 个摆件、
 > 128×96 沙面雕刻时的帧率与内存**」，而实际被断言的只有首屏、笔刷、
@@ -564,9 +578,16 @@ SandSession (数据)
 >   （p95 0.4ms / 2.4ms），再与 33.3ms 的 30fps 预算对照。
 > - **3D 路由**仍未覆盖：headless 下 WebGL 走 SwiftShader 软渲染，
 >   数字与真机无可比性，断言它只会产出误导性的绿。只能在真机手工看。
-> - **内存**仍未覆盖：`performance.memory` 需要 Chromium 私有 flag，
->   且波动极大，做成门禁会变成随机红灯。泄漏特征改由单测间接守
->   （`brush.perf.test.ts` 的「后段不得比前段慢 3 倍」）。
+> - **内存**：真内存仍未覆盖 —— `performance.memory` 需要 Chromium 私有
+>   flag，且波动极大，做成门禁会变成随机红灯。但 v2.0 收尾时补上了
+>   **静态可查的那一半**：`scripts/audit/leak-listeners.mjs` 检查 97 个
+>   生产文件里每个 `addEventListener` / `setInterval` 都有配对清理
+>   （14 处注册点全部干净）；`brush.perf.test.ts` 的「后段不得比前段慢
+>   3 倍」继续做间接防线。写这个门禁时**顺带查出并修掉一个真实的
+>   无界缓存**：`symbolSource.ts` 的 `imageCache` 存已解码的
+>   `HTMLImageElement`（单位是 MB 不是 KB），原来只增不减，逐页翻包
+>   会一直涨。已改为 LRU 上限 64 张，6 项单元测试 +
+>   12 项变异验证钉住。详见 `docs/TESTING.md` §6.2.4。
 >
 > 变异验证：`scripts/audit/render-perf-self-test.mjs`（R1 让摆件数不符、
 > R2 拖慢绘制，均被抓到）。写这个自检时又踩到两个「变异自己失效」的坑：
