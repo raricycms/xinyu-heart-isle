@@ -363,10 +363,42 @@ npm run check
 > 排查残留：`Get-NetTCPConnection -LocalPort <port> -State Listen`。
 
 ```bash
-node scripts/dev/check-routes.mjs        # 12 条路由 + 深链刷新 + 移动端溢出
+node scripts/dev/check-routes.mjs        # 15 条路由 + 深链刷新 + 移动端溢出
 node scripts/dev/check-sandbox-flow.mjs  # 沙盘完整交互流程
 node scripts/dev/browse.mjs /sandbox --shot=out.png
 ```
+
+**保留的探针脚本**（`probe-*.mjs` / `check-*.mjs`）
+
+这些不是"顺手留下的杂物"，每一个都记录了一个**人工排查过的结论**，
+头部注释里写着"当时为什么查、查出了什么"。它们的价值是
+**让结论可复现** —— 三个月后有人怀疑"沙面湿沙到底比干沙暗多少"，
+跑一下就知道，不用重新搭环境。
+
+| 脚本 | 它记录了什么 |
+| --- | --- |
+| `probe-wet-visible.mjs` | 湿沙与干沙的像素差（变化占比 32.3%、`Δrgb=42.29`），滑杆夹取 bug 的复现 |
+| `probe-surface.mjs` | 沙面介质层视觉验收：768 格真的画出来了 / 湿沙更暗 / 挖沙有硬边 |
+| `probe-surface-stroke.mjs` | 沙面工具条是否真把笔迹写进事件流 |
+| `probe-stroke-broken.mjs` | 换组件后笔画失效的现场（事件数 1→2 退化成 1→1） |
+| `probe-stroke-with-items.mjs` | 托盘上有摆件时笔画还能不能落笔 |
+| `probe-cell-colors.mjs` | 逐格取色，分清「方块感」来自 fill / wall / gloss 哪一个 |
+| `probe-draw-cost.mjs` | `iso2d` 单次完整绘制耗时（100 / 400 摆件） |
+| `probe-frame-timing.mjs` | headless 下 rAF 间隔稳定到没有信息量（中位 6.0ms） |
+| `probe-sandbox-dom.mjs` | 沙盘页真实 DOM 与存储行为 |
+| `probe-sandbox.mjs` | 定点排查沙面点击 / 滑块 / 保存三处为何不生效 |
+| `probe-surface-zoom.mjs` | 托盘区域高倍特写，用于人工核对视觉 |
+| `probe-zoom-crop.mjs` | 只截湿斑周围一小块，判断"方块感"来自哪个元素 |
+
+> **卫生规则**：`scripts/dev/` 下每个脚本都必须有人认领 ——
+> 要么被本文档（或其他 Markdown）列出，要么被别的脚本 import，
+> 要么被其他脚本的注释引用为测量出处。**无主的脚本会被
+> `scripts/audit/repo-hygiene.mjs` 判红。**
+>
+> 这条规则是被一次清理催生的：该目录曾有 46 个文件、其中 30 个
+> 既无文档引用也无人 import，谁都不敢删（"可能是别人要用的"）。
+> 逐个读完头注释后，19 个是没有结论的一次性调试脚本（删掉），
+> 12 个记录了可复现的结论（保留并登记在上表）。
 
 ## 9. i18n 约定
 

@@ -53,7 +53,7 @@ function walk(dir, out = []) {
     const p = join(dir, name);
     const st = statSync(p);
     if (st.isDirectory()) {
-      if (name === 'node_modules' || name === 'dist') continue;
+      if (name === 'node_modules' || name === 'dist' || name === '.git') continue;
       walk(p, out);
     } else {
       out.push({ path: p, size: st.size });
@@ -61,6 +61,16 @@ function walk(dir, out = []) {
   }
   return out;
 }
+
+/* 只收文本类文件（给"文档引用"检查用） */
+function walkText(dir) {
+  return walk(dir)
+    .map((f) => f.path)
+    .filter((p) => /\.(md|mjs|ts|tsx|json)$/.test(p));
+}
+
+/** `scripts/dev/` 的判断（两种分隔符都要吃，Windows 下是反斜杠） */
+const DEV_DIR_TEST = /^scripts[\\/]dev[\\/]/;
 
 const srcFiles = [...walk('src'), ...walk('scripts')];
 
@@ -73,22 +83,109 @@ console.log('');
 {
   /*
    * 这些命名是自测/调试常用的临时文件形态。
-   * 允许 `*.test.ts`（那是正式测试），只禁"探针"性质的名字。
+   *
+   * ⚠️ 第一版只匹配 `\.[tj]sx?$`（.ts/.tsx/.js/.jsx），
+   * **漏掉了 `.mjs`** —— 而本仓库的脚本全是 `.mjs`。
+   * 于是 `scripts/dev/` 里整整 27 个 `probe-*.mjs` 一个都没被抓到，
+   * 门禁报告"没有探针文件"，绿得很漂亮。
+   *
+   * 这是又一次「幽灵门禁」：断言形状正确，但**覆盖范围漏了最该管的那一类**。
+   * 更讽刺的是它发生在一条专门防"残留文件"的门禁里。
+   *
+   * 教训：写路径/后缀正则时，**先去仓库里数一数真实的文件后缀分布**，
+   * 而不是凭项目"应该是 TS"的印象写。
    */
   const PROBE_PATTERNS = [
-    /^__.*probe.*\.[tj]sx?$/i, // __net-probe.ts ← 实际泄漏过的那个
-    /^probe-.*\.[tj]sx?$/i,
-    /^tmp-.*\.[tj]sx?$/i,
+    /^__.*probe.*\.[cm]?[tj]sx?$/i, // __net-probe.ts ← 实际泄漏过的那个
+    /^probe-.*\.[cm]?[tj]sx?$/i,
+    /^tmp-.*\.[cm]?[tj]sx?$/i,
     /\.orig$/,
     /\.rej$/,
     /\.bak$/,
   ];
 
+  /*
+   * 例外：`scripts/dev/` 是 CONTRACT §8 明文记录的**开发期核查脚本**目录，
+   * 那里的 `probe-*.mjs` 是有意保留的（记录某个 bug 的可复现现场）。
+   *
+   * 但例外不能是"免检"。见下面 B2：这些文件必须被文档引用，
+   * 否则就是无人认领的残留。
+   */
+  const DEV_DIR = /^scripts[\\/]dev[\\/]/;
+
   const hits = srcFiles
+    .filter((f) => !DEV_DIR.test(f.path))
     .filter((f) => PROBE_PATTERNS.some((re) => re.test(basename(f.path))))
     .map((f) => f.path);
 
-  item('src/ 与 scripts/ 里没有探针/临时文件', hits.length === 0, hits.join(', '));
+  item('src/ 与 scripts/（除 scripts/dev/）里没有探针/临时文件',
+    hits.length === 0, hits.join(', '));
+}
+
+/* ── A2. scripts/dev/ 的探针必须被文档引用 ── */
+{
+  /*
+   * `scripts/dev/` 允许放开发期探针，但**每个脚本都必须有人认领** ——
+   * 要么被某个 Markdown 文档提到（说明它记录了什么问题），
+   * 要么被其他脚本 import（说明它是活跃工具，如 `harness.mjs`）。
+   *
+   * 为什么要有这条：这些脚本是我历次排查时写的一次性工具。
+   * 排查完就该删，除非它记录的结论还有价值。
+   * 如果既没人引用也没人 import，那它就是**没人知道为什么存在**的文件 ——
+   * 下一个人不敢删，也不知道能不能改。
+   *
+   * ⚠️ 第一版把 `walk()` 的全部结果都算进来，于是 21 张基线截图
+   * （`scripts/dev/shots/*.png`）和 9 个 JSON 也被要求"被文档引用"。
+   * 那些是**生成物**，不是源文件 —— 它们由 `verify-visual-criteria.mjs`
+   * 产出并被视觉回归引用，不该逐个写进 Markdown。
+   *
+   * 规则修正：只查**脚本**（.mjs/.ts），生成物一律放过。
+   * 这也是「先分清源文件与生成物，再谈卫生」——
+   * 否则门禁会逼人去给每一张截图编一个文档引用。
+   */
+  const devScripts = srcFiles.filter(
+    (f) => DEV_DIR_TEST.test(f.path) && /\.[cm]?[tj]sx?$/.test(f.path),
+  );
+  const mdFiles = walkText('.').filter((p) => /\.md$/.test(p) && !/node_modules/.test(p));
+  const mdText = mdFiles.map((p) => readFileSync(p, 'utf8')).join('\n');
+
+  /*
+   * 认领的三种方式：
+   *   1. 被 Markdown 文档提到 —— CONTRACT §8 那种
+   *   2. 被其他 dev 脚本 import —— `harness.mjs` / `_shared/preview.mjs` 这种
+   *   3. **被其他脚本的源码提到**（含注释）
+   *
+   * 第 3 种是被 `probe-ridge-trench.mjs` 逼出来的：
+   * `verify-visual-criteria.mjs` L339 的注释里写着
+   *   「实测（`probe-ridge-trench.mjs`，读 canvas 亮度）：…」
+   * 这不是调用，而是**把一个测量结论的出处留在这里**。
+   * 那种探针恰恰最该保留 —— 它是"这个数字怎么来的"的唯一凭证。
+   *
+   * 所以认领不等于"被依赖"，也包含"被引用为证据"。
+   */
+  const allScriptText = srcFiles
+    .filter((f) => /\.[cm]?[tj]sx?$/.test(f.path) && !DEV_DIR_TEST.test(f.path))
+    .map((f) => readFileSync(f.path, 'utf8'))
+    .join('\n');
+
+  const claimed = [];
+  const orphans = [];
+  for (const f of devScripts) {
+    const name = basename(f.path);
+    const inDoc = mdText.includes(name);
+    const inImport = new RegExp(
+      `from\\s+['"]\\./${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`,
+    ).test(allScriptText);
+    const inSourceComment = allScriptText.includes(name);
+    if (inDoc || inImport || inSourceComment) claimed.push(name);
+    else orphans.push(name);
+  }
+
+  item(
+    `scripts/dev/ 的 ${devScripts.length} 个脚本都有人认领（文档 / import / 源码出处）`,
+    orphans.length === 0,
+    orphans.length > 0 ? `无主 ${orphans.length} 个：` + orphans.join(', ') : '',
+  );
 }
 
 /* ── B. 0 字节的源码文件 ── */

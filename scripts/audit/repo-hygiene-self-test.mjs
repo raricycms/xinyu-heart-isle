@@ -2,7 +2,7 @@
  * repo-hygiene.mjs 的变异验证：
  * 重现当初那次真实的泄漏，看门禁能否抓到。
  */
-import { writeFileSync, existsSync, unlinkSync, readFileSync } from 'node:fs';
+import { writeFileSync, existsSync, unlinkSync, readFileSync, rmdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const PROBE = 'src/lib/__net-probe.ts';
@@ -61,6 +61,33 @@ console.log('');
   const r = runGate();
   check('tmp- 命名的文件被抓', r.code !== 0, 'exit=' + r.code);
   unlinkSync('src/lib/tmp-debug.ts');
+}
+
+/* 变异 3b：.mjs 探针 —— 第一版门禁漏掉的就是这个后缀 */
+/*
+ * ⚠️ 这条变异是补上一个**真实存在过的幽灵**。
+ *
+ * 门禁第一版的探针正则写的是 `\.[tj]sx?$`，只覆盖 .ts/.tsx/.js/.jsx，
+ * **漏了 .mjs** —— 而本仓库脚本全是 .mjs。于是 `scripts/dev/` 里
+ * 27 个 `probe-*.mjs` 一个都没被抓到，门禁报告"没有探针文件"。
+ *
+ * 断言形状是对的（"不该有探针文件"），覆盖范围漏了最该管的一类。
+ * 这条变异保证以后不会退化回去。
+ */
+{
+  writeFileSync('scripts/audit/__mjs-probe.mjs', 'export const y = 2;\n', 'utf8');
+  const r = runGate();
+  check('.mjs 后缀的探针文件也会被抓（第一版漏了这个后缀）', r.code !== 0, 'exit=' + r.code);
+  unlinkSync('scripts/audit/__mjs-probe.mjs');
+}
+
+/* 变异 3c：scripts/dev/ 下的无主脚本 */
+{
+  writeFileSync('scripts/dev/probe-nobody-claims-this.mjs', 'export const z = 3;\n', 'utf8');
+  const r = runGate();
+  check('scripts/dev/ 下无人认领的脚本被抓', r.code !== 0, 'exit=' + r.code);
+  check('  报出无主那条', /认领/.test(r.out), r.out.slice(-300));
+  unlinkSync('scripts/dev/probe-nobody-claims-this.mjs');
 }
 
 /* 变异 4：把当初的 bug 放回 cleanup()，治本那条必须抓到 */
