@@ -31,6 +31,92 @@ npm run validate:pack -- mypack.symbolpack.json
 
 ---
 
+## 1.5 手把手做第一个包（五分钟）
+
+> 这一节假定你**没写过 JSON**。如果已经会，直接跳到第 2 节。
+
+### 第 1 步：打开一个文本编辑器
+
+用记事本也行，但推荐 [VS Code](https://code.visualstudio.com/) 或
+[Sublime Text](https://www.sublimetext.com/)——它们会把括号配对着色，
+少一半的错。
+
+### 第 2 步：复制这段，粘进去
+
+```json
+{
+  "format": "symbol-pack/v1",
+  "name": "我的第一个包",
+  "license": "CC0-1.0",
+  "symbols": [
+    {
+      "id": "mypack.first",
+      "label": "第一个沙具",
+      "subcategory": "abstract-symbol",
+      "glyph": "⭐"
+    }
+  ]
+}
+```
+
+### 第 3 步：只改两个地方
+
+- `"id": "mypack.first"` → 把 `mypack` 换成你自己的名字（拼音、英文都行，
+  **只能用字母数字和短横线**）。`.first` 后面那截随便起。
+- `"label": "第一个沙具"` → 换成你想显示的中文名。
+- 想换图案就改 `"glyph"` 里的 emoji。
+
+> ⚠️ **`id` 必须带一个点。** `mypack.first` 有点，是对的；
+> 写成 `first` 会报「必须形如 mypack.tree」。
+> 原因是怕跟别人起的名字撞车，也怕跟内置的 327 个沙具重名。
+
+### 第 4 步：存成 `.symbolpack.json` 结尾的文件
+
+比如 `我的沙具.symbolpack.json`。
+
+> ⚠️ **编码必须是 UTF-8。** 记事本"另存为"时右下角有编码选项，
+> 选 UTF-8。选成 ANSI 的话中文名会变成乱码。
+
+### 第 5 步：校验
+
+在心屿的项目目录里打开终端（PowerShell / 终端都行）：
+
+```bash
+npm run validate:pack -- "我的沙具.symbolpack.json"
+```
+
+看到这个就成了：
+
+```
+✓ 我的沙具.symbolpack.json
+    我的第一个包　包 id：...　版本：1.0.0
+    授权：CC0-1.0　作者：未署名
+    沙具 1 条（全部用字形）　文件 0KB
+```
+
+### 第 6 步：导入
+
+心屿里「沙具库 → 导入沙具包」，选那个文件。
+
+### 出错了怎么办
+
+校验器会逐条告诉你是第几个沙具、哪个字段不对。照着改就行。
+下面是新手最常撞的五个：
+
+| 报错 | 真实原因 | 怎么改 |
+| --- | --- | --- |
+| `format 必须是 "sandbox-symbol-pack/v1"` | `format` 那行写错或漏了 | 照抄 `"symbol-pack/v1"` |
+| `不得为空的 name` / `缺少包名称` | 没写 `name` | 加一行 `"name": "随便起个名"` |
+| `license 必须是 SPDX 标识…` | 没写或写了 `unknown` | 写 `"CC0-1.0"`（放弃权利）或 `"proprietary"` |
+| `id「xxx」不合法：必须形如 mypack.tree` | id 里没有点 | 改成 `mypack.xxx` |
+| `不是有效的 JSON` | 少了个逗号 / 括号 / 多打了个逗号 | 看报错给的行号，或粘进在线 JSON 校验器 |
+
+> 第 5 条（JSON 语法错）占新手问题的一大半。最常见的两个：
+> **最后一项后面别加逗号**、**中文引号 `“”` 不是英文引号 `""`**。
+> 如果你从网页上复制代码，注意引号可能被自动换成中文的。
+
+---
+
 ## 2. 文件长什么样
 
 ```json
@@ -56,7 +142,8 @@ npm run validate:pack -- mypack.symbolpack.json
 }
 ```
 
-完整可用示例：[`samples/example.symbolpack.json`](../samples/example.symbolpack.json)
+完整可用示例：[`samples/example.symbolpack.json`](../samples/example.symbolpack.json)（纯字形，1KB）
+内嵌图片示例：[`samples/example-image.symbolpack.json`](../samples/example-image.symbolpack.json)
 故意做坏的示例（列了 12 类错误）：[`samples/broken.symbolpack.json`](../samples/broken.symbolpack.json)
 
 ---
@@ -144,6 +231,20 @@ data:image/png;base64,iVBORw0KGgoAAAANS...
 
 支持 `png` / `jpeg` / `webp` / `gif` / `svg+xml`。
 **单条 ≤ 200KB，整个包 ≤ 1.5MB。**
+
+> **别手抄 base64。** 多一个换行、少一个字符，校验器只会说
+> "不是合法的内嵌图片"，而你会以为是校验器的问题。
+> 正确做法是用工具转换：
+>
+> ```bash
+> # 命令行（macOS / Linux）
+> printf 'data:image/png;base64,%s' "$(base64 -w0 my.png)"
+> ```
+>
+> 完整可运行的例子见
+> [`samples/example-image.symbolpack.json`](../samples/example-image.symbolpack.json)
+> —— 里面是两条真实的 8×8 PNG，以及一条用 `glyph` 的条目，
+> 说明**同一个包里两种写法可以混用**。
 
 > **为什么禁止 http(s) 图片？**
 > 加载网络图片意味着：① 你的设备会向那个服务器发请求，暴露你在用

@@ -1,0 +1,38 @@
+{
+  "format": "symbol-pack/v1",
+  "id": "example-image",
+  "name": "示例 · 内嵌图片",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "author": "心屿示例",
+  "description": "演示 image 字段：两条沙具用内嵌的 PNG（8×8 纯色块），而不是 emoji 字形。真实使用时请换成你自己的图片。",
+  "symbols": [
+    {
+      "id": "example-image.tree",
+      "label": "树（内嵌图）",
+      "labelEn": "Tree (embedded)",
+      "category": "nature",
+      "subcategory": "nature-plant",
+      "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mPw6Yn7jw8zjAwFAJzgjUF6uPdgAAAAAElFTkSuQmCC",
+      "tags": ["树", "绿色", "示例"]
+    },
+    {
+      "id": "example-image.water",
+      "label": "水（内嵌图）",
+      "labelEn": "Water (embedded)",
+      "category": "nature",
+      "subcategory": "nature-water",
+      "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mOIadrwHx9mGBkKAPAFo0GJFG32AAAAAElFTkSuQmCC",
+      "tags": ["水", "蓝色", "示例"]
+    },
+    {
+      "id": "example-image.mixed",
+      "label": "字形与图片可以混用",
+      "labelEn": "Mixed is fine",
+      "category": "abstract",
+      "subcategory": "abstract-symbol",
+      "glyph": "🔀",
+      "tags": ["同一个包里两种都行"]
+    }
+  ]
+}

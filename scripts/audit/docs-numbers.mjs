@@ -158,11 +158,12 @@ const DOCS_TO_SCAN = [
 /*
  * 文档里"提议新建"的文件，此刻本不该存在。
  * 白名单必须显式登记，不能靠"找不到就跳过"—— 那样审计就恒真了。
+ *
+ * 目前是**空的**：曾经登记过 `samples/example-image.symbolpack.json`
+ * （`GOOD_FIRST_ISSUES.md` 里提议要新建），现在已经做出来了，
+ * 所以从白名单移除 —— 留着它等于给这个文件开了永久免检。
  */
-const PROPOSED_FILES = new Set([
-  /* GOOD_FIRST_ISSUES.md 任务 5 要新建的示例 */
-  'samples/example-image.symbolpack.json',
-]);
+const PROPOSED_FILES = new Set();
 
 /*
  * 裸文件名（如 `ghost-fields.mjs`、`stats.ts`）在文档里很常见，

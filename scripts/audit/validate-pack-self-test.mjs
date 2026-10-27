@@ -90,6 +90,28 @@ function runValidator(args) {
   check('示例包输出沙具条数', /沙具 3 条/.test(r.out), r.out.slice(-150));
 }
 
+/* ── 1b. 内嵌图片的包也必须通过 ─────────────────────────────── */
+/*
+ * `image` 字段是新手最容易写错的地方（base64 抄错、前缀写错、
+ * 用 http 链接）。示例包必须真的能过，否则文档教的是错的。
+ */
+{
+  const r = runValidator(['samples/example-image.symbolpack.json']);
+  check('内嵌图片示例通过（退出 0）', r.code === 0, 'code=' + r.code + ' ' + r.out.slice(-250));
+  check('  正确统计出 2 条用图片', /其中 2 条用内嵌图片/.test(r.out), r.out.slice(-250));
+
+  const json = runValidator(['samples/example-image.symbolpack.json', '--json']);
+  let parsed = null;
+  try {
+    parsed = JSON.parse(json.out);
+  } catch {
+    /* 下面判定 */
+  }
+  check('  --json 报告 imageCount = 2', parsed?.files?.[0]?.summary?.imageCount === 2,
+    'imageCount=' + parsed?.files?.[0]?.summary?.imageCount);
+  check('  --json 报告 symbolCount = 3', parsed?.files?.[0]?.summary?.symbolCount === 3);
+}
+
 /* ── 2. 坏包必须红，且条数对得上 ─────────────────────────────── */
 {
   const r = runValidator(['samples/broken.symbolpack.json']);
@@ -217,8 +239,14 @@ function runValidator(args) {
     '共 ' + subs.length + '，缺 ' + (missing.join(',') || '无'));
 
   /* 示例文件必须真的存在，文档里链接了它们 */
-  check('文档引用的示例包存在', existsSync('samples/example.symbolpack.json'));
+  check('文档引用的字形示例包存在', existsSync('samples/example.symbolpack.json'));
+  check('文档引用的图片示例包存在', existsSync('samples/example-image.symbolpack.json'));
   check('文档引用的坏样例存在', existsSync('samples/broken.symbolpack.json'));
+
+  /* 文档里提到的三个样例都要在文档里被引用，否则没人知道它们存在 */
+  check('文档提到了图片示例包', doc.includes('example-image.symbolpack.json'));
+  check('文档提到了字形示例包', doc.includes('example.symbolpack.json'));
+  check('文档提到了坏样例', doc.includes('broken.symbolpack.json'));
 }
 
 console.log('');
