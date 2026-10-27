@@ -89,6 +89,24 @@ function cloneItem(item: SandboxItem): SandboxItem {
 }
 
 /**
+ * 最小结构检查：这是个能用的沙具吗？
+ *
+ * 只查 `id` 是字符串，因为后续所有操作（move/remove/note…）都按 id 定位。
+ * 不校验 x/y/scale 范围 —— 那些是 UI 的职责，重放层强行校验会让
+ * 历史文件里一个越界的历史数值导致整个会话打不开。
+ *
+ * 抽成函数是因为两处要用：`item.add` 和折叠事件恢复。
+ * 两处各写一遍判断，早晚会漂移成两种容错标准。
+ */
+function isSandboxItem(value: unknown): value is SandboxItem {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === 'string'
+  );
+}
+
+/**
  * 重放器的内部累加器。
  *
  * 为什么需要它：`applyEvent` 为了 React 的引用比较必须是纯函数，
@@ -265,9 +283,38 @@ export function applyEvent(
       return { ...state, locked: true };
     }
 
-    case 'session.save':
-    case 'session.import': {
+    case 'session.save': {
       return state;
+    }
+
+    case 'session.import': {
+      /*
+       * 折叠事件（`from: 'compacted'`）承载**被丢弃窗口里的沙具**。
+       *
+       * ── 这里修过一个「假承诺」bug ──────────────────────────────────
+       *
+       * 原实现的注释写着「把它们折叠进一条合成事件，保证重放一致」，
+       * 但这一分支直接 `return state` —— 什么都没恢复。
+       * 实测：先摆 10 个沙具、再做 4005 次移动，重放后 items 数是 0。
+       * 也就是说注释承诺的事从来没发生过，而没有任何测试发现它。
+       *
+       * 现在折叠事件把 `items` 一起带下来，重放时并回状态。
+       */
+      const carried = payload.items;
+      if (!Array.isArray(carried) || carried.length === 0) return state;
+
+      /*
+       * 合并策略：折叠事件在事件流**最前面**，所以它带来的沙具
+       * 先入状态；后续事件（move/remove 等）再按序作用于它们。
+       * 已经在状态里的同 id 项不重复添加（后续 item.add 会覆盖）。
+       */
+      const existing = new Set(state.items.map((item) => item.id));
+      const restored = carried
+        .filter((item): item is SandboxItem => isSandboxItem(item) && !existing.has(item.id))
+        .map(cloneItem);
+
+      if (restored.length === 0) return state;
+      return { ...state, items: [...restored, ...state.items] };
     }
 
     case 'annotation.add': {
@@ -414,19 +461,130 @@ export function pushEvent(stack: CommandStack, event: SandboxEvent): CommandStac
   if (nextEvents.length > MAX_EVENTS) {
     const head = nextEvents.slice(0, nextEvents.length - MAX_EVENTS);
     const tail = nextEvents.slice(head.length);
-    // 如果被丢弃的头部含 item.add，把它们折叠进一条合成事件，保证重放一致
-    const adds = head.filter((e) => e.type === 'item.add');
-    const compacted =
-      adds.length > 0
-        ? [
-            {
-              t: head[head.length - 1]?.t ?? 0,
-              type: 'session.import' as const,
-              payload: { from: 'compacted' },
-            },
-          ]
-        : [];
-    return { events: [...compacted, ...tail], cursor: compacted.length + tail.length };
+
+    /*
+     * 折叠是**累积**的，不是每次重算。
+     *
+     * ── 这里修过一个会让用户丢沙具的 bug ────────────────────────────
+     *
+     * 原实现只检查「本次被丢弃的 head 里有没有 item.add」。问题在于：
+     *
+     *   第 1 次截断：head = [item.add#0]  → 插入合成事件 ✓
+     *   第 2 次截断：head = [move#1]      → adds 为空，不插入 ✗
+     *
+     * 于是上一次插的合成事件因为不是新插入的，被正常推进 tail 后
+     * 在**下一次**截断时落到 head 里，而 head 里它又不是 item.add，
+     * 就被安静地扔掉了。
+     *
+     * 实测后果：先摆 10 个沙具、再做 4005 次移动，
+     * 最终事件流里 item.add 数量 = **0**，重放出来的沙盘是空的。
+     * 用户看到的是「用了很久之后，早期摆的东西全不见了」。
+     *
+     * 判据必须是：只要被丢弃的头部含 `item.add`，**或本来就是一条
+     * 折叠事件**，就要在新的窗口头部补一条合成事件。后者保证
+     * 折叠状态能一直传到窗口前面，不会中途蒸发。
+     */
+    const needsCompaction = head.some(
+      (e) =>
+        e.type === 'item.add' ||
+        (e.type === 'session.import' && e.payload?.from === 'compacted'),
+    );
+
+    /* 时间戳沿用「最后一条被丢弃事件」的时间，让折叠点在时间轴上位置正确 */
+    const compactedAt = head[head.length - 1]?.t ?? 0;
+
+    if (needsCompaction) {
+      /*
+       * 如果 tail 开头已经是一条折叠事件（上一次截断留下的），
+       * 不要重复插入 —— 两条 `session.import` 会让重放多做一次空导入。
+       */
+      const tailStartsWithCompacted =
+        tail.length > 0 &&
+        tail[0]!.type === 'session.import' &&
+        tail[0]!.payload?.from === 'compacted';
+
+      if (tailStartsWithCompacted) {
+        return { events: tail, cursor: tail.length };
+      }
+
+      /*
+       * 插入折叠事件会让总长变成 MAX_EVENTS + 1，所以要从 tail
+       * 再削掉一条，保证**永不超限**。
+       *
+       * 第一版忘了这一步，实测长度是 4001 —— 上限形同虚设，
+       * 而「上限」是本地存储不爆的唯一保障。
+       */
+      const trimmedOff = tail.length > 0 ? tail[0] : undefined;
+      const trimmedTail = tail.length > 0 ? tail.slice(1) : tail;
+
+      /*
+       * 把被丢弃窗口里的沙具**带下去**。
+       *
+       * 光插一条 `{from:'compacted'}` 是不够的 —— 重放器看到它
+       * 只能知道"这里有过东西"，不知道是**什么**。
+       * 所以要把 head 里所有 item.add 的 item 收集起来，
+       * 连同上一条折叠事件已经携带的那些（累积保留）。
+       */
+      const carried = new Map<string, SandboxItem>();
+
+      /*
+       * 先继承上一次折叠携带的沙具。
+       *
+       * 上一轮的折叠事件这时候可能出现在**两个位置之一**：
+       *   - 在 head 里（这轮刚好被挤出窗口）
+       *   - 在 tail 的最前面（这轮还在窗口里，这是常见情况）
+       *
+       * 第一版只查了 head，于是每轮都从零开始收集：
+       * 实测摆 10 个沙具后只携带了 1 个 —— 因为每次截断只丢 1 条事件，
+       * 上一轮的折叠事件留在 tail 里没被看到，累积链条断了。
+       */
+      for (const candidate of [head[0], tail[0]]) {
+        if (
+          !candidate ||
+          candidate.type !== 'session.import' ||
+          candidate.payload?.from !== 'compacted'
+        ) {
+          continue;
+        }
+        const inherited = candidate.payload?.items;
+        if (!Array.isArray(inherited)) continue;
+        for (const item of inherited) {
+          if (isSandboxItem(item)) carried.set(item.id, item);
+        }
+      }
+
+      /* 收集本次被丢弃的 item.add */
+      for (const dropped of head) {
+        if (dropped.type !== 'item.add') continue;
+        const item = dropped.payload?.item;
+        if (isSandboxItem(item)) carried.set(item.id, item);
+      }
+
+      /*
+       * 为腾位置被削掉的那条 `tail[0]` 也可能是 `item.add`。
+       *
+       * 不收集它，那个沙具就**彻底消失**了：它既不在折叠事件里，
+       * 也不在后续事件流里，重放时根本不出现。
+       *
+       * 实测症状：先摆 10 个沙具再做 4005 次移动，最终只活了 1 个。
+       * 因为每次截断都从 tail 头部削掉一条（正好是下一个 item.add），
+       * 而只有第 1 次削到的那条在 head 里被看到了。
+       */
+      if (trimmedOff && trimmedOff.type === 'item.add') {
+        const item = trimmedOff.payload?.item;
+        if (isSandboxItem(item)) carried.set(item.id, item);
+      }
+
+      const compactedEvent: SandboxEvent = {
+        t: compactedAt,
+        type: 'session.import',
+        payload: { from: 'compacted', items: [...carried.values()] },
+      };
+      const events = [compactedEvent, ...trimmedTail];
+      return { events, cursor: events.length };
+    }
+
+    return { events: tail, cursor: tail.length };
   }
   return { events: nextEvents, cursor: nextEvents.length };
 }

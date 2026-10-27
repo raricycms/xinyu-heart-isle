@@ -74,7 +74,52 @@ function collectUses(src) {
   return uses;
 }
 
+/**
+ * 解析命令行参数。
+ *
+ * 与其他审计器保持同一套接口（`ghost-fields.mjs` / `i18n-dead-keys.mjs`）：
+ *
+ *   --strict       严格模式：仅有 fallback 的未定义引用也算失败
+ *   --report-only  只报告，退出码恒为 0（供"先看看现状"用）
+ *
+ * 之前这个脚本**不接受任何参数**，也不报错 —— 传 `--strict` 会被静默忽略，
+ * 使用者以为严格模式生效了，其实没有。这是最坏的一种接口不一致。
+ */
+function parseArgs(argv) {
+  const args = { strict: false, reportOnly: false };
+  for (const raw of argv) {
+    if (raw === '--strict') args.strict = true;
+    else if (raw === '--report-only') args.reportOnly = true;
+    else if (raw === '--help' || raw === '-h') {
+      console.log(`CSS 自定义属性对账
+
+用法：node scripts/audit/css-tokens.mjs [选项]
+
+选项：
+  --strict       严格模式：有 fallback 的未定义引用也算失败
+  --report-only  只报告，退出码恒为 0
+  --help         显示本帮助
+
+退出码：
+  0  未发现失效引用
+  1  发现失效引用（或 --strict 下有未定义引用）
+`);
+      process.exit(0);
+    } else {
+      /*
+       * 未知参数必须报错退出 —— 静默忽略会让人以为选项生效了。
+       * 这一条是被自己的 bug 教会的：以前传 --strict 毫无反应。
+       */
+      console.error(`未知参数：${raw}（--help 查看用法）`);
+      process.exit(1);
+    }
+  }
+  return args;
+}
+
 function main() {
+  const { strict, reportOnly } = parseArgs(process.argv.slice(2));
+
   const tokenPath = path.join(STYLE_DIR, TOKEN_FILE);
   const tokenSrc = stripComments(readFileSync(tokenPath, 'utf8'));
   const tokenDefined = collectDefined(tokenSrc);
@@ -128,11 +173,31 @@ function main() {
   console.log(`  定义表：${TOKEN_FILE}（${tokenDefined.size} 个核心 token）+ 全文件合并，共 ${defined.size} 个`);
   console.log(`  扫描：${files.length} 个 CSS 文件，${checked} 处 var() 引用`);
   console.log(`  有 fallback 的未定义引用（无害）：${harmless} 处`);
+  if (reportOnly) console.log('  模式：--report-only（只报告，不影响退出码）');
 
-  if (broken.length === 0) {
+  /*
+   * 三种结局：
+   *   broken > 0            → 退出 1（真失效，必须修）
+   *   broken = 0, strict    → 若有无害引用则退出 1（严格模式：要求彻底干净）
+   *   broken = 0, 非 strict → 退出 0
+   *
+   * --strict 的语义与 ghost-fields / i18n-dead-keys 保持一致：
+   * 「默认放过可容忍的问题，加 --strict 就要求零问题」。
+   */
+  const strictBlocked = strict && broken.length === 0 && harmless > 0;
+
+  if (broken.length === 0 && !strictBlocked) {
     console.log('\n✓ 没有「未定义且无 fallback」的 var() 引用');
     console.log('  —— 这类引用会让整条 CSS 声明被静默丢弃，是浏览器里最安静的一类 bug。');
     process.exit(0);
+  }
+
+  if (strictBlocked) {
+    console.log(`\n✗ --strict：仍有 ${harmless} 处 var() 指向未定义变量（靠 fallback 兜着）。`);
+    console.log('  非严格模式下这些算「无害」，因为浏览器会退回 fallback 值。');
+    console.log('  但它们意味着**设计 token 体系有缺口**：某个值只在调用点写死，');
+    console.log('  没进 global.css。以后想统一调整这个值，会漏掉这些地方。');
+    process.exit(reportOnly ? 0 : 1);
   }
 
   console.log(`\n✗ ${broken.length} 处 var() 指向未定义变量且没有 fallback：`);
@@ -144,7 +209,7 @@ function main() {
   console.log('\n修复方式二选一：');
   console.log('  1. 在 global.css 里定义该 token（若它是设计体系的一部分）；');
   console.log('  2. 给调用点加 fallback：var(--x, 实际值)（若它只是一次性值）。');
-  process.exit(1);
+  process.exit(reportOnly ? 0 : 1);
 }
 
 main();
