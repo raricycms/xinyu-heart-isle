@@ -323,14 +323,20 @@ export function applyStroke(
   return current;
 }
 
-/** 沙面统计（客观数字，不解释含义） */
+/**
+ * 沙面统计（客观数字，不解释含义）。
+ *
+ * 曾经还有一个 `dugToBottomRatio`（挖到底部格子的比例）。
+ * 它被算出来、被一条单测断言过，但**没有任何 UI 用它** ——
+ * 属于「测试绿着、产品看不见」的那种字段：测试给了它存在的错觉。
+ * `movedRatio` 和 `wetRatio` 才是 SessionStats 真正展示的两个。
+ */
 export function surfaceStats(state: SurfaceState): {
   meanHeight: number;
   maxHeight: number;
   minHeight: number;
   movedRatio: number;
   wetRatio: number;
-  dugToBottomRatio: number;
 } {
   const { data } = state.height;
   const total = data.length;
@@ -338,7 +344,6 @@ export function surfaceStats(state: SurfaceState): {
   let max = 0;
   let min = 255;
   let moved = 0;
-  let bottom = 0;
   let wet = 0;
 
   for (let i = 0; i < total; i += 1) {
@@ -347,7 +352,6 @@ export function surfaceStats(state: SurfaceState): {
     if (value > max) max = value;
     if (value < min) min = value;
     if (Math.abs(value - SURFACE_BASE_LEVEL) > 6) moved += 1;
-    if (value <= 8) bottom += 1;
     if (state.wetness[i] > 96) wet += 1;
   }
 
@@ -357,7 +361,6 @@ export function surfaceStats(state: SurfaceState): {
     minHeight: min,
     movedRatio: total > 0 ? moved / total : 0,
     wetRatio: total > 0 ? wet / total : 0,
-    dugToBottomRatio: total > 0 ? bottom / total : 0,
   };
 }
 

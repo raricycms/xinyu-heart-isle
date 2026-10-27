@@ -134,8 +134,13 @@ export interface SessionStatsData {
   zones: ZoneCell[];
   /** 用到的沙具及次数（按次数倒序） */
   symbolCounts: SymbolCount[];
-  /** 有注释的摆件数 */
-  annotatedItemCount: number;
+  /*
+   * 这里原本还有一个 `annotatedItemCount`（有注释的摆件数）。
+   * 它被算了整整一年，却**没有任何一处 UI 显示它** —— 幽灵字段。
+   * 与 `noteCount` 也不同义：后者是「写备注这个动作发生了多少次」，
+   * 前者是「最终有几个摆件带着备注」。但既然没人展示，就没留下它的理由。
+   * 这份代码里「算了但没人看」的字段和「写了但没人读的偏好」是同一种病。
+   */
   /** 事件类型分布（按 EVENT_TYPE_ORDER，只用出现过的类型，按 count 倒序） */
   eventTypes: EventTypeCount[];
   /** 沙具子类汇总（按 count 倒序） */
@@ -225,7 +230,6 @@ export function computeSessionStats(session: SandSession): SessionStatsData {
     wetRatio,
     zones,
     symbolCounts,
-    annotatedItemCount: session.items.filter((item) => (item.note ?? '').trim().length > 0).length,
     eventTypes: buildEventTypes(counts, events.length),
     subcategoryCounts: buildSubcategoryCounts(session.items),
     categoryCounts: buildCategoryCounts(session.items),

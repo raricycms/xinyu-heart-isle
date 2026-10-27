@@ -173,7 +173,13 @@ describe('笔刷操作', () => {
       state = digSand(state, { x: 0.5, y: 0.5, radius: 0.2, strength: 1 });
     }
     expect(sampleHeight(state.height, 0.5, 0.5)).toBeLessThan(SURFACE_BASE_LEVEL);
-    expect(surfaceStats(state).dugToBottomRatio).toBeGreaterThan(0);
+    /*
+     * 这里原先断言的是 `surfaceStats(state).dugToBottomRatio > 0`。
+     * 那个字段只被这一行断言用过，产品代码从不读它 —— 一条为了
+     * 「让字段有个消费方」而存在的断言，反而成了它存活的理由。
+     * 改用真被展示的 `minHeight`，测的仍是「挖得足够深」这件事。
+     */
+    expect(surfaceStats(state).minHeight).toBeLessThanOrEqual(8);
   });
 
   it('抹平让邻域更平', () => {

@@ -341,31 +341,12 @@ export function relax(field: HeightField, passes = 1, threshold = 18, wet = fals
   return next;
 }
 
-/** 全场统计：平均高度、低于基准的格子比例（「挖到底露出蓝底」比例） */
-export function fieldStats(field: HeightField): {
-  meanHeight: number;
-  minHeight: number;
-  maxHeight: number;
-  emptyRatio: number;
-  wetRatio: number;
-} {
-  let sum = 0;
-  let min = 255;
-  let max = 0;
-  let empty = 0;
-  const total = field.data.length;
-  for (let i = 0; i < total; i += 1) {
-    const v = field.data[i];
-    sum += v;
-    if (v < min) min = v;
-    if (v > max) max = v;
-    if (v < 12) empty += 1;
-  }
-  return {
-    meanHeight: sum / total,
-    minHeight: min,
-    maxHeight: max,
-    emptyRatio: total > 0 ? empty / total : 0,
-    wetRatio: 0,
-  };
-}
+/**
+ * 说明：这里原本有一个 `fieldStats(field)`，返回平均高度 / 最低最高 /
+ * 「挖到底」比例。它**一处调用都没有**（连测试都没写），纯死代码。
+ *
+ * 沙面统计的真实入口是 `surfaceOps.ts` 的 `surfaceStats(state)`，
+ * 它会顺带算湿度，而且返回的字段确实被 SessionStats 展示。
+ * 两个函数看起来像同一件事，实际只有后者在链路上 —— 留着前者只会
+ * 让下一个改这里的人以为改的是产品行为。
+ */
