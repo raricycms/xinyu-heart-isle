@@ -9,11 +9,57 @@
 
 ## [未发布]
 
+### 测试门禁（v2.0 收尾）
+
+这一段记录的全是**门禁**：它们不改产品行为，但决定了"产品现在是否真的可信"。
+每个新增门禁都配了变异验证（故意破坏产品代码，确认门禁会红）。
+
+**补上真实缺陷**
+
+- 修掉 `symbolSource.ts` 的无界图片缓存：`imageCache` 存的是已解码的
+  `HTMLImageElement`（单位 MB 不是 KB），原来只增不减，逐页翻包会一直涨。
+  改为 LRU 上限 64 张，6 项单测 + 12 项变异验证
+- 修掉 `iso2d` 默认渲染器的键盘缺口：原来只有 `role="list"` 的只读文本，
+  键盘用户能**听到**摆件但没法**操作**。升级为按钮组（Tab 进入、方向键移动、
+  Enter 选中），E2E `keyboard-flow` 21 项断言钉住
+
+**新增门禁**
+
+| 门禁 | 防什么 | 项数 |
+| --- | --- | --- |
+| `leak-listeners.mjs` | 监听器/计时器没清理（97 文件，14 处注册点） | — |
+| `routes-health.mjs` | 路由白屏、运行时错误、移动端横向溢出 | 135 |
+| `routes-health-self-test.mjs` | 上面那条会不会红（4 种破坏） | 16 |
+| `idb-fallback.test.ts` | IndexedDB 不可用时的降级路径 | 13 |
+| `idb-fallback-self-test.mjs` | 上面那条（含 1 个已判明的等价变异） | 13 |
+| `cache-limit-self-test.mjs` | 图片缓存上限会不会失效 | 12 |
+| `docs-numbers.mjs` 扩展 | 同一事实写在多处，只校验一处的盲区 | 27 处 |
+| `faq-claims.mjs` | FAQ 里的技术断言与代码脱节 | 48 |
+| `faq-claims-self-test.mjs` | 上面那条（5 种断言写错） | 15 |
+
+**抓到的自己的幽灵门禁**
+
+- `routes-health.mjs` 第一版用 `main.innerText` 判白屏。实测 Chrome 对
+  `display:none` 的元素 `innerText` **仍有 37 字**（只有 `visibility:hidden`
+  才是 0），于是"整块没显示"是绿的。改用 `getBoundingClientRect` +
+  `getComputedStyle`
+- `faq-claims.mjs` 第一版 48 项全绿，变异验证发现 **3 条是幽灵**：
+  数字断言太松（FAQ 别处有同名数字互相掩护）、只验代码没验文档写的路径、
+  红线断言被别处措辞命中。其中第二条最讽刺 —— 写这条门禁的起因就是
+  我自己在 FAQ 里写错了迁移文件路径
+
+**文档**
+
+- 新增 `docs/FAQ.md`：数据在哪、会不会上传、沙盘怎么用、沙具包、无障碍与兼容、许可
+- `docs/TESTING.md` §6.2 多条缺口重写，记录每次"补不上"的真实原因
+- `docs/VISION.md` §5.8 更新过时描述（键盘、内存、白屏、FAQ）
+
 ### 计划中
 
 - 移动端 30fps 真机复测
 - 量表文案专业复核（ISI 第 1 题、RSES 第 8 题）
 - 12 条热线逐条拨打核验
+- 临床顾问审阅（**唯一真正的发版阻断项**）
 
 ---
 
