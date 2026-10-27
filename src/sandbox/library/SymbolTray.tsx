@@ -11,7 +11,7 @@ import {
   subcategoryLabels,
   type SymbolCategory,
 } from '@/sandbox/symbols';
-import { filterByCategory, groupBySubcategory, mergeEntries, resolveFavorites, searchEntries, starterEntries } from './search';
+import { filterByCategory, groupBySubcategory, mergeEntries, resolveFavorites, resolveRecents, searchEntries, starterEntries } from './search';
 import { imageForSymbol } from './packs';
 import { usePackImageMap, usePackSymbols, usePacks } from './usePacks';
 import '@/styles/sandbox-library.css';
@@ -47,6 +47,14 @@ export interface SymbolTrayProps {
   favorites?: readonly string[];
   /** 切换收藏；不传则不显示星标按钮（只读场景） */
   onToggleFavorite?: (symbolId: string) => void;
+  /**
+   * 最近用过的沙具 id（受控，最近优先）。
+   *
+   * 与 `favorites` 分开传而不是合成一个「快捷列表」：
+   * 两者语义不同（主动声明 vs 行为副产品），混在一起以后
+   * 想给其中之一加权限/上限就会互相牵扯。
+   */
+  recents?: readonly string[];
 }
 
 const LONG_PRESS_MS = 500;
@@ -62,6 +70,9 @@ const STARTER_LIMIT = 24;
  */
 const EMPTY_FAVORITES: readonly string[] = [];
 
+/** 稳定空「最近使用」，理由同 EMPTY_FAVORITES */
+const EMPTY_RECENTS: readonly string[] = [];
+
 type CategoryTab = SymbolCategory | 'all';
 
 export function SymbolTray({
@@ -73,6 +84,7 @@ export function SymbolTray({
   onPreview,
   favorites = EMPTY_FAVORITES,
   onToggleFavorite,
+  recents = EMPTY_RECENTS,
 }: SymbolTrayProps) {
   const { t, symbolLabel } = useI18n();
   const packSymbols = usePackSymbols();
@@ -82,7 +94,13 @@ export function SymbolTray({
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [tab, setTab] = useState<CategoryTab>('all');
+  /*
+   * 两个筛选态是**互斥**的：同时开「收藏」和「最近」既没有语义
+   * （交集/并集都不对），也会让下面的 `flat` 顺序判断变复杂。
+   * 所以打开一个就关掉另一个。
+   */
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [recentsOnly, setRecentsOnly] = useState(false);
   const [focusIndex, setFocusIndex] = useState(0);
   const [preview, setPreview] = useState<SandboxSymbolEntry | null>(null);
 
@@ -115,7 +133,7 @@ export function SymbolTray({
 
   /* 非搜索态：按大类 / 子类分组（顺带记下每组在扁平列表里的起始下标） */
   const grouped = useMemo(() => {
-    if (searching || tab === 'all' || favoritesOnly) return [];
+    if (searching || tab === 'all' || favoritesOnly || recentsOnly) return [];
     const groups = groupBySubcategory(filterByCategory(allEntries, tab));
     let offset = 0;
     return groups.map((group) => {
@@ -123,12 +141,12 @@ export function SymbolTray({
       offset += group.items.length;
       return { ...group, start };
     });
-  }, [allEntries, favoritesOnly, searching, tab]);
+  }, [allEntries, favoritesOnly, recentsOnly, searching, tab]);
 
   const starter = useMemo(() => {
-    if (searching || tab !== 'all' || favoritesOnly) return [];
+    if (searching || tab !== 'all' || favoritesOnly || recentsOnly) return [];
     return starterEntries(allEntries, STARTER_LIMIT);
-  }, [allEntries, favoritesOnly, searching, tab]);
+  }, [allEntries, favoritesOnly, recentsOnly, searching, tab]);
 
   /**
    * 收藏视图。
@@ -142,13 +160,33 @@ export function SymbolTray({
     [allEntries, favorites],
   );
 
-  /** 当前网格的扁平顺序（键盘导航用，与渲染顺序一致） */
+  /**
+   * 「最近使用」视图（VISION §5.2 L218 的第三项，v2.0 补齐）。
+   *
+   * 顺序就是 `recents` 的顺序（最近优先），不做二次排序 ——
+   * 这个列表的全部价值就是「刚才那件在最前面」。
+   * 与收藏一样，悬空 id（沙具包卸载）在这里被静默丢弃。
+   */
+  const recentItems = useMemo(
+    () => resolveRecents(allEntries, recents),
+    [allEntries, recents],
+  );
+
+  /**
+   * 当前网格的扁平顺序（键盘导航用，与渲染顺序一致）。
+   *
+   * **搜索优先于筛选态**：在收藏视图里输入关键词时，用户要的是
+   * 「在全部沙具里搜」，而不是「在收藏里搜」—— 后者会让人以为
+   * 库里的东西不见了。清空搜索框后自然回到原来的收藏/最近视图，
+   * 所以这里不需要在输入时清状态（清了反而丢失用户的选择）。
+   */
   const flat = useMemo(() => {
-    if (favoritesOnly) return favoriteItems;
     if (searching) return searchResult;
+    if (favoritesOnly) return favoriteItems;
+    if (recentsOnly) return recentItems;
     if (tab === 'all') return starter;
     return grouped.flatMap((group) => group.items);
-  }, [favoriteItems, favoritesOnly, grouped, searchResult, searching, starter, tab]);
+  }, [favoriteItems, favoritesOnly, grouped, recentItems, recentsOnly, searchResult, searching, starter, tab]);
 
   /* 列表变化时把焦点索引夹住，避免越界后按方向键没反应 */
   useEffect(() => {
@@ -367,7 +405,7 @@ export function SymbolTray({
         </span>
       </div>
 
-      {/* ------------------------------- 收藏筛选 ------------------------------- */}
+      {/* ---------------------------- 收藏 / 最近使用 ---------------------------- */}
       <div className="lib__filters">
         <button
           type="button"
@@ -377,12 +415,37 @@ export function SymbolTray({
           data-testid="sandbox-favorites-toggle"
           onClick={() => {
             setFavoritesOnly((prev) => !prev);
+            /* 与「最近使用」互斥：同时开会得到没有意义的交集视图 */
+            setRecentsOnly(false);
             setFocusIndex(0);
           }}
         >
           <span aria-hidden>★</span>
           {t('sandbox.favorites')}
           <span className="mono">{favorites.length}</span>
+        </button>
+
+        {/*
+          「最近使用」（VISION §5.2 L218，v2.0 补齐）。
+          `recents.length === 0` 时仍然渲染按钮但禁用 ——
+          直接隐藏会让用户以为没这个功能，禁用+计数 0 才说明
+          「功能在，只是你还没用过」。
+        */}
+        <button
+          type="button"
+          className={cx('lib__favfilter', recentsOnly && 'is-active')}
+          aria-pressed={recentsOnly}
+          disabled={disabled || recents.length === 0}
+          data-testid="sandbox-recents-toggle"
+          onClick={() => {
+            setRecentsOnly((prev) => !prev);
+            setFavoritesOnly(false);
+            setFocusIndex(0);
+          }}
+        >
+          <span aria-hidden>↺</span>
+          {t('sandbox.recents')}
+          <span className="mono">{recents.length}</span>
         </button>
       </div>
 
@@ -403,6 +466,13 @@ export function SymbolTray({
                 disabled={disabled}
                 onClick={() => {
                   setTab(key);
+                  /*
+                   * 点大类标签意味着「我要按类看」，
+                   * 必须退出收藏/最近这两个筛选态 ——
+                   * 否则会出现「高亮的是大类，显示的是收藏」的错位。
+                   */
+                  setFavoritesOnly(false);
+                  setRecentsOnly(false);
                   setFocusIndex(0);
                 }}
               >
@@ -418,17 +488,39 @@ export function SymbolTray({
         className="lib__body"
         ref={gridRef}
         role="group"
-        aria-label={tab === 'all' ? t('sandbox.libraryAll') : categoryLabels[tab]}
+        aria-label={
+          recentsOnly
+            ? t('sandbox.recents')
+            : favoritesOnly
+              ? t('sandbox.favorites')
+              : tab === 'all'
+                ? t('sandbox.libraryAll')
+                : categoryLabels[tab]
+        }
         onKeyDown={handleGridKeyDown}
       >
         {flat.length === 0 ? (
           <p className="lib__empty small muted">
-            {favoritesOnly ? t('sandbox.favoritesEmpty') : t('sandbox.libraryEmpty')}
+            {recentsOnly
+              ? t('sandbox.recentsEmpty')
+              : favoritesOnly
+                ? t('sandbox.favoritesEmpty')
+                : t('sandbox.libraryEmpty')}
           </p>
-        ) : favoritesOnly ? (
-          <div className="lib__grid">{favoriteItems.map((entry, index) => renderItem(entry, index))}</div>
         ) : searching ? (
           <div className="lib__grid">{searchResult.map((entry, index) => renderItem(entry, index))}</div>
+        ) : recentsOnly ? (
+          <>
+            {/*
+              标题写明「最近」而不是复用「常用」——
+              「常用」暗示频率统计，而这里只按时间倒序，不做任何计数。
+              CONTRACT §5.6：不统计、不排序偏好，避免变成行为画像。
+            */}
+            <p className="lib__section-label small muted">{t('sandbox.recentsLabel')}</p>
+            <div className="lib__grid">{recentItems.map((entry, index) => renderItem(entry, index))}</div>
+          </>
+        ) : favoritesOnly ? (
+          <div className="lib__grid">{favoriteItems.map((entry, index) => renderItem(entry, index))}</div>
         ) : tab === 'all' ? (
           <>
             <p className="lib__section-label small muted">常用</p>

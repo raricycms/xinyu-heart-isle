@@ -262,6 +262,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   locale: 'zh-CN',
   outlineMode: false,
   favoriteSymbols: [],
+  recentSymbols: [],
 };
 
 /**

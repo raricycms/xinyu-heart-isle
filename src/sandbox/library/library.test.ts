@@ -25,10 +25,13 @@ import {
 } from '@/sandbox/symbols';
 import {
   MAX_FAVORITES,
+  MAX_RECENTS,
   filterByCategory,
   groupBySubcategory,
   mergeEntries,
+  pushRecent,
   resolveFavorites,
+  resolveRecents,
   searchEntries,
   starterEntries,
   subcategoriesOf,
@@ -240,6 +243,82 @@ describe('收藏（v1.1「搜索/收藏」里一直缺的那一半）', () => {
 
   it('空收藏返回空数组，不抛错', () => {
     expect(resolveFavorites(SYMBOLS, [])).toEqual([]);
+  });
+});
+
+/*
+ * 「最近使用」（VISION §5.2 L218 的第三项，v2.0 补齐）。
+ *
+ * 这一组的关键差异是**顺序语义与收藏相反**：收藏按加入顺序（先收的在前），
+ * 最近使用按最新优先（后用的在前）。写反了功能看着"有"，用起来是错的，
+ * 所以两个方向都要断言。
+ */
+describe('最近使用（v1.1「搜索/收藏/最近使用」里最后补齐的一项）', () => {
+  it('pushRecent 把新条目放最前', () => {
+    expect(pushRecent([], 'mountain')).toEqual(['mountain']);
+    expect(pushRecent(['mountain'], 'volcano')).toEqual(['volcano', 'mountain']);
+  });
+
+  it('重复使用只前移、不产生第二份', () => {
+    let list: string[] = [];
+    for (const id of ['a', 'b', 'c']) list = pushRecent(list, id);
+    expect(list).toEqual(['c', 'b', 'a']);
+
+    /* 再用一次 a：a 回到队首，长度不变 */
+    list = pushRecent(list, 'a');
+    expect(list).toEqual(['a', 'c', 'b']);
+    expect(new Set(list).size).toBe(list.length);
+  });
+
+  it('不修改入参（useSyncExternalStore 靠引用变化重渲染）', () => {
+    const original = ['a'];
+    const next = pushRecent(original, 'b');
+    expect(original).toEqual(['a']);
+    expect(next).not.toBe(original);
+  });
+
+  it('超过上限时丢最旧的一条（尾部），最新的进得去', () => {
+    let list: string[] = [];
+    for (let i = 0; i < MAX_RECENTS; i += 1) list = pushRecent(list, `id-${i}`);
+    expect(list).toHaveLength(MAX_RECENTS);
+    expect(list[0]).toBe(`id-${MAX_RECENTS - 1}`); // 最新的在最前
+    expect(list[MAX_RECENTS - 1]).toBe('id-0'); // 最旧的沉到尾部
+
+    list = pushRecent(list, 'newest');
+    expect(list).toHaveLength(MAX_RECENTS);
+    expect(list[0]).toBe('newest');
+    expect(list).not.toContain('id-0'); // 最旧那条被挤掉
+  });
+
+  it('最近使用上限明显小于收藏上限（两者用途不同）', () => {
+    expect(MAX_RECENTS).toBeLessThan(MAX_FAVORITES);
+    expect(MAX_RECENTS).toBeGreaterThan(0);
+  });
+
+  it('resolveRecents 按最近优先返回条目', () => {
+    const resolved = resolveRecents(SYMBOLS, ['volcano', 'mountain']);
+    expect(resolved.map((entry) => entry.id)).toEqual(['volcano', 'mountain']);
+  });
+
+  it('resolveRecents 丢弃悬空 id（沙具包卸载 / 内置库改名）', () => {
+    const resolved = resolveRecents(SYMBOLS, ['mountain', 'this-id-is-gone', 'volcano']);
+    expect(resolved.map((entry) => entry.id)).toEqual(['mountain', 'volcano']);
+  });
+
+  it('空列表返回空数组，不抛错', () => {
+    expect(resolveRecents(SYMBOLS, [])).toEqual([]);
+  });
+
+  it('顺序与收藏相反 —— 这条守住「最近优先 vs 加入顺序」的区别', () => {
+    const ids = ['mountain', 'volcano', 'desert'];
+    let favs: string[] = [];
+    let recents: string[] = [];
+    for (const id of ids) {
+      favs = toggleFavorite(favs, id);
+      recents = pushRecent(recents, id);
+    }
+    expect(favs).toEqual(ids); // 加入顺序
+    expect(recents).toEqual([...ids].reverse()); // 最近优先
   });
 });
 

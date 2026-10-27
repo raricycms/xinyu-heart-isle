@@ -810,6 +810,198 @@ const scenarios: Scenario[] = [
         }
 
         /*
+         * 「最近使用」（VISION §5.2 L218 的第三项）。
+         *
+         * 这一段的存在理由和视图缩放那一段一样：§5.2 把
+         * 「搜索 / 收藏 / 最近使用」并列为 P0，但 v2.0 收尾对账时发现
+         * 前两项都做了、**最近使用从来没实现过** —— 没有入口、没有字段、
+         * 没有断言，所以谁都没发现。
+         *
+         * 断言四件事，缺一不可：
+         *   1. 摆放沙具后 localStorage 里出现 recentSymbols（真的写进去了）
+         *   2. 列表里有内容（不是写了个空数组 —— 那是"字段存在≠功能存在"）
+         *   3. 点「最近」能切到对应视图且看得到那件沙具
+         *   4. 再点一次能退出（不是单向开关）
+         *
+         * 【踩过的坑】第一版用 `Number(el.textContent)` 读计数，
+         * 但那个元素的文案是「3 件在场」，不是「3」→ 得到 NaN，
+         * 经 JSON 序列化变成 null，报错显示「null → null」，
+         * 完全看不出根因。这里改为复用文件里已有的 readCount()。
+         */
+        {
+          /* 本地重读一次计数，避免依赖上面闭包里可能已经变化的 after */
+          const readCountNow = async (): Promise<number> => {
+            const text = await page
+              .$eval('[data-testid="sandbox-item-count"]', (node) => node.textContent ?? '')
+              .catch(() => '');
+            const match = text.match(/(\d+)/);
+            return match ? Number(match[1]) : -1;
+          };
+
+          const readRecents = async (): Promise<string> => {
+            return page.evaluate(() => {
+              for (let i = 0; i < localStorage.length; i += 1) {
+                const key = localStorage.key(i);
+                if (!key || !key.includes('preferences')) continue;
+                const raw = localStorage.getItem(key) ?? '';
+                if (!raw.includes('recentSymbols')) continue;
+                try {
+                  const parsed = JSON.parse(raw) as { recentSymbols?: string[] };
+                  return JSON.stringify(parsed.recentSymbols ?? []);
+                } catch {
+                  return '__parse_error__';
+                }
+              }
+              return '__absent__';
+            });
+          };
+
+          /*
+           * 先清空最近列表，让「摆放后变 1 条」成为可验证的强断言。
+           * 不清的话，如果之前跑过一次，这次读到的可能是 3、4 条，
+           * 「有内容」就永远成立 —— 又一条恒真的护身符。
+           */
+          await page.evaluate(() => {
+            for (let i = 0; i < localStorage.length; i += 1) {
+              const key = localStorage.key(i);
+              if (!key || !key.includes('preferences')) continue;
+              const raw = localStorage.getItem(key) ?? '';
+              if (!raw.includes('preferences')) continue;
+              try {
+                const parsed = JSON.parse(raw) as Record<string, unknown>;
+                if ('recentSymbols' in parsed) {
+                  parsed.recentSymbols = [];
+                  localStorage.setItem(key, JSON.stringify(parsed));
+                }
+              } catch {
+                /* 解析不了就跳过 —— 本轮断言会因此失败，正好暴露问题 */
+              }
+            }
+          });
+
+          const countBefore = await readCountNow();
+          const recentsBefore = await readRecents();
+
+          /*
+           * 摆放：点沙具格子，若计数没变（该实现是"选中"而非"摆放"），
+           * 退一步点舞台中心。这个兜底照抄上面 L665-678 的既有做法。
+           */
+          await page.evaluate(async () => {
+            document.querySelector<HTMLElement>('[data-testid="lib-item"]')?.click();
+            await new Promise((resolve) => setTimeout(resolve, 350));
+          });
+          let countAfter = await readCountNow();
+
+          if (countAfter === countBefore) {
+            const stage = await page.$('[data-testid="sandbox-stage"]');
+            const box = stage ? await stage.boundingBox() : null;
+            if (box) {
+              await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+              await new Promise((resolve) => setTimeout(resolve, 400));
+              countAfter = await readCountNow();
+            }
+          }
+
+          expectTrue(
+            '摆放后沙盘里真的多了一件（最近使用的前提）',
+            countAfter === countBefore + 1,
+            `计数 ${countBefore} → ${countAfter}`,
+          );
+
+          const recentsAfter = await readRecents();
+
+          expectTrue(
+            '摆放后 localStorage 里写入了 recentSymbols',
+            recentsAfter !== '__absent__' && recentsAfter !== '__parse_error__',
+            `写入前：${recentsBefore}，写入后：${recentsAfter}`,
+          );
+
+          let recentsList: string[] = [];
+          if (recentsAfter !== '__absent__' && recentsAfter !== '__parse_error__') {
+            recentsList = JSON.parse(recentsAfter) as string[];
+          }
+          expectTrue(
+            '最近使用列表里恰好有 1 条（清空后只摆了一件）',
+            recentsList.length === 1,
+            `${recentsList.length} 条：${recentsAfter}`,
+          );
+
+          /* 计数徽标要跟着变 —— 只断言 localStorage 会漏掉「UI 没更新」 */
+          const badge = await page.evaluate(() => {
+            const btn = document.querySelector('[data-testid="sandbox-recents-toggle"]');
+            return btn ? (btn.textContent ?? '').trim() : '__absent__';
+          });
+          expectTrue(
+            '「最近」按钮显示非零计数',
+            badge !== '__absent__' && /[1-9]/.test(badge),
+            `按钮文案：${badge}`,
+          );
+
+          /* 切到最近视图：应当看得到刚摆的沙具 */
+          const entered = await page.evaluate(async () => {
+            const btn = document.querySelector<HTMLElement>(
+              '[data-testid="sandbox-recents-toggle"]',
+            );
+            if (!btn) return { ok: false, pressed: null as string | null, count: 0 };
+            btn.click();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            return {
+              ok: true,
+              pressed: btn.getAttribute('aria-pressed'),
+              count: document.querySelectorAll('[data-testid="lib-item"]').length,
+            };
+          });
+          expectTrue(
+            '点「最近」进入最近视图（aria-pressed=true）',
+            entered.ok && entered.pressed === 'true',
+            `ok=${entered.ok} pressed=${entered.pressed}`,
+          );
+          expectTrue(
+            '最近视图里能看到沙具',
+            entered.count >= 1,
+            `看到 ${entered.count} 件`,
+          );
+
+          /* 再点一次退出 —— 单向开关是常见 bug */
+          const exited = await page.evaluate(async () => {
+            const btn = document.querySelector<HTMLElement>(
+              '[data-testid="sandbox-recents-toggle"]',
+            );
+            if (!btn) return null;
+            btn.click();
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            return btn.getAttribute('aria-pressed');
+          });
+          expectTrue(
+            '再点一次能退出最近视图（不是单向开关）',
+            exited === 'false',
+            `aria-pressed=${exited}`,
+          );
+
+          /*
+           * 还原：删掉刚摆的那一件，避免污染后续断言的件数。
+           * 先确保有选中项（点一下舞台上的摆件），再按 Delete。
+           */
+          await page.evaluate(async () => {
+            /* 选中一个摆件：优先用已有的 data-item-id，没有就点舞台 */
+            const item = document.querySelector<HTMLElement>('[data-item-id]');
+            item?.click();
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            document.body.dispatchEvent(
+              new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }),
+            );
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          });
+
+          const restored = await readCountNow();
+          expectTrue(
+            '收尾：删掉测试摆件后计数回落（不污染后续断言）',
+            restored === countBefore,
+            `期望回到 ${countBefore}，实际 ${restored}`,
+          );
+        }
+
+        /*
          * 视图缩放 / 旋转（VISION §5.7 P0「移动端手势」）。
          *
          * 这一段的存在理由：§5.7 把「双指缩放/旋转」列为 P0，但 v2.0

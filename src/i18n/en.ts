@@ -78,6 +78,14 @@ export const en: Record<string, string> = {
   'sandbox.favoritesAdd': 'Favorite',
   'sandbox.favoritesRemove': 'Favorited',
   'sandbox.favoritesEmpty': 'No favorites yet. Long-press or right-click a figure, then tap Favorite.',
+  /*
+   * "Recents" — deliberately avoids "frequent" / "most used".
+   * This list is ordered by time only; no counting, no preference ranking
+   * (the line we do not cross with interpretation, CONTRACT §5.6).
+   */
+  'sandbox.recents': 'Recent',
+  'sandbox.recentsLabel': 'Placed recently',
+  'sandbox.recentsEmpty': 'Nothing placed yet. Your first figure will show up here.',
   'sandbox.libraryImportPack': 'Import a figure pack',
 
   'sandbox.scene': 'Scene',

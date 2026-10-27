@@ -89,6 +89,16 @@ export const zhCN: Record<string, string> = {
   'sandbox.favoritesAdd': '收藏',
   'sandbox.favoritesRemove': '已收藏',
   'sandbox.favoritesEmpty': '还没有收藏。长按或右键沙具，在预览条里点「收藏」。',
+  /*
+   * 「最近使用」（VISION §5.2 L218）。
+   *
+   * 文案刻意避开「常用」「最爱」这类词：本功能只按时间倒序记录
+   * 摆过哪几件，不做频率统计 —— 说成「常用」会让人以为我们在
+   * 给沙具排偏好，而那是解读的边界（CONTRACT §5.6）。
+   */
+  'sandbox.recents': '最近',
+  'sandbox.recentsLabel': '最近摆过的',
+  'sandbox.recentsEmpty': '还没有摆过沙具。摆下第一件之后，它会出现在这里。',
   'sandbox.libraryImportPack': '导入沙具包',
 
   /* -------------------------------- 场景主题 ------------------------------- */

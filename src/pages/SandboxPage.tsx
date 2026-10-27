@@ -17,7 +17,7 @@ import { forkSessionAt, parseResumeParams } from '@/sandbox/replay/resume';
 import { SandRendererSwitch } from '@/sandbox/render';
 import { symbolLabel } from '@/sandbox/symbols';
 import { SymbolTray } from '@/sandbox/library/SymbolTray';
-import { toggleFavorite } from '@/sandbox/library/search';
+import { pushRecent, toggleFavorite } from '@/sandbox/library/search';
 import { usePackImageMap } from '@/sandbox/library';
 import { Toolbar } from '@/sandbox/workbench/Toolbar';
 import { Inspector } from '@/sandbox/workbench/Inspector';
@@ -59,6 +59,13 @@ import '@/styles/sandbox-view.css';
  * 新数组，`SymbolTray` 里依赖 `favorites` 的 `useMemo` 全部失效。
  */
 const EMPTY_FAVORITES: readonly string[] = [];
+
+/**
+ * 稳定空「最近使用」。理由同上 —— 同样的引用稳定性陷阱。
+ * 分开定义是因为两者的语义不同（收藏 vs 行为副产品），
+ * 共用一个常量会让以后想给其中之一设默认值时绊一跤。
+ */
+const EMPTY_RECENTS: readonly string[] = [];
 
 export default function SandboxPage() {
   const { t } = useI18n();
@@ -233,6 +240,18 @@ export default function SandboxPage() {
 
   /* -------------------------------- 操作 --------------------------------- */
 
+  /**
+   * 「最近使用」列表（VISION §5.2 L218 的第三项）。
+   *
+   * 与收藏并列但用途不同：收藏是用户主动留的，最近使用是摆放行为的
+   * 副产品，用于「找回刚才那件」。只读在这里，写入在 `handleAddSymbol`
+   * 里（摆放成功那一刻）。
+   *
+   * 位置必须在此处而不是「偏好」小节里 —— `handleAddSymbol` 的
+   * 函数体和依赖数组都读它，放到后面会变成 TDZ 错误。
+   */
+  const recents = prefs.recentSymbols ?? EMPTY_RECENTS;
+
   const handleAddSymbol = useCallback(
     (symbolId: string) => {
       if (api.locked) {
@@ -242,13 +261,28 @@ export default function SandboxPage() {
       const id = api.addItem(symbolId);
       if (id) {
         setSelectedId(id);
+        /*
+         * 记入「最近使用」（VISION §5.2 L218）。
+         *
+         * 只在实际摆放成功后才记 —— 封盘状态下的点击会在上面 return，
+         * 不该污染最近列表；也放在 `addItem` 返回 id 之后，因为摆不下
+         * （超上限）时不该记。
+         *
+         * `pushRecent` 会去重并把已存在的条目前移到队首，
+         * 所以这里不需要判断「是否已存在」—— 反复用同一件之后，
+         * 它必须仍在列表最前面，否则「最近」的语义就断了。
+         *
+         * 刻意不在拖动/撤销时更新：最近使用回答的是「我拿过哪几件」，
+         * 不是「我最后碰过哪几件」。
+         */
+        setPreferences({ recentSymbols: pushRecent(recents, symbolId) });
         // 落沙声：用 symbolId 的哈希做种子，同一个沙具每次声音一致
         let seed = 0;
         for (let i = 0; i < symbolId.length; i += 1) seed = (seed * 31 + symbolId.charCodeAt(i)) >>> 0;
         soundRef.current.drop(seed || 1);
       }
     },
-    [api, show, t],
+    [api, show, t, recents],
   );
 
   /**
@@ -513,6 +547,7 @@ export default function SandboxPage() {
               disabled={api.locked}
               favorites={favorites}
               onToggleFavorite={handleToggleFavorite}
+              recents={recents}
             />
           </Card>
 

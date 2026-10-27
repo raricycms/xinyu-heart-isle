@@ -238,3 +238,50 @@ export function resolveFavorites(
     .map((id) => byId.get(id))
     .filter((entry): entry is SandboxSymbolEntry => entry !== undefined);
 }
+
+/* -------------------------------------------------------------------------- */
+/*                                 最近使用                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 最近使用上限。
+ *
+ * 比收藏小得多（24 对 200），理由是两者的用途不同：
+ * 收藏是"我特意留着的"，可以很多；最近使用是"刚才拿过的那几个"，
+ * 超过两三行就失去意义 —— 用户扫视「最近」时的心理预期是"找回刚才那件"，
+ * 列表越长越难扫。24 约等于三行网格，不需要滚动。
+ */
+export const MAX_RECENTS = 24;
+
+/**
+ * 记录一次使用，返回**新数组**（同 `toggleFavorite`，靠引用变化驱动重渲染）。
+ *
+ * 三条约定：
+ *
+ * 1. **最近的排最前**（与收藏相反）。收藏按"加入顺序"排是为了让手感
+ *    稳定；最近使用按"最近优先"排是因为它的唯一价值就是快速回取 ——
+ *    刚用过的必须第一眼看到。
+ * 2. **重复使用只前移、不产生第二份**。否则反复用同一件会把它刷满整个
+ *    列表，其他刚用过的全被挤掉。
+ * 3. **必须传条目 id 而不是对象**：列表里只存 id，避免沙具包换版后
+ *    存下过期的名称/图标。
+ */
+export function pushRecent(recents: readonly string[], id: string): string[] {
+  const next = [id, ...recents.filter((entry) => entry !== id)];
+  return next.length > MAX_RECENTS ? next.slice(0, MAX_RECENTS) : next;
+}
+
+/**
+ * 解析最近使用列表。与 `resolveFavorites` 一样丢弃悬空 id。
+ *
+ * 注意顺序：`recents` 本身已是"最近优先"，这里不再反转。
+ */
+export function resolveRecents(
+  entries: readonly SandboxSymbolEntry[],
+  recents: readonly string[],
+): SandboxSymbolEntry[] {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  return recents
+    .map((id) => byId.get(id))
+    .filter((entry): entry is SandboxSymbolEntry => entry !== undefined);
+}
