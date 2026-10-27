@@ -29,7 +29,8 @@
  *   - 文档变了 → 这里也得跟着改，改的时候必须看一眼代码
  * 两边互相钉住。
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /* ── 文档声称的数字（出处见注释，改动时请同步 docs/VISION.md）── */
 const CLAIMS = {
@@ -121,7 +122,6 @@ for (const [label, claim, actual] of checks) {
 }
 
 console.log('');
-
 if (failures > 0) {
   console.error('✗ ' + failures + ' 项文档数字与代码不一致');
   console.error('');
@@ -133,4 +133,157 @@ if (failures > 0) {
   process.exit(1);
 }
 
-console.log('✓ 全部 ' + checks.length + ' 项文档数字与代码一致');
+/* ── 文档里的路径与命令 ────────────────────────────────────────── */
+/*
+ * 数字对了，不代表文档能用。
+ *
+ * 同一类幽灵的另一种形态：文档里写着 `npm run some:script` 或
+ * `` `scripts/foo.mjs` ``，而那个脚本早被删了 / 从没存在过。
+ * 数字审计抓不到它 —— 它不是数字。测试更抓不到 —— 测试不读文档。
+ *
+ * 新来的人照着做，第一步就撞墙，然后不知道是文档错了还是自己错了。
+ */
+const DOCS_TO_SCAN = [
+  'CONTRIBUTING.md',
+  'GOOD_FIRST_ISSUES.md',
+  'docs/SYMBOL_PACK.md',
+  'docs/FORMAT.md',
+  'docs/TESTING.md',
+  'docs/VISION.md',
+  '.github/ISSUE_TEMPLATE/bug_report.md',
+  '.github/ISSUE_TEMPLATE/feature_request.md',
+  '.github/ISSUE_TEMPLATE/content_feedback.md',
+];
+
+/*
+ * 文档里"提议新建"的文件，此刻本不该存在。
+ * 白名单必须显式登记，不能靠"找不到就跳过"—— 那样审计就恒真了。
+ */
+const PROPOSED_FILES = new Set([
+  /* GOOD_FIRST_ISSUES.md 任务 5 要新建的示例 */
+  'samples/example-image.symbolpack.json',
+]);
+
+/*
+ * 裸文件名（如 `ghost-fields.mjs`、`stats.ts`）在文档里很常见，
+ * 读者靠编辑器搜索能定位到。所以按**递归搜索整个仓库**判断，
+ * 而不是只在几个固定目录里找 —— 第一版用了固定目录列表，
+ * 结果 `src/sandbox/view/measure.test.ts` 这种四层深的文件全被判成"不存在"，
+ * 22 个报告里 21 个是误报。**误报和漏报一样有害**：
+ * 一次误报就够让人从此不信这道门禁。
+ */
+const IGNORED_DIRS = new Set(['node_modules', 'dist', 'tmp', '.git', 'coverage', '.vite']);
+
+/** 仓库内文件名索引（只建一次） */
+const fileIndex = new Set();
+/** 也存相对路径，用于匹配 `src/lib/storage.ts` 这种带目录的引用 */
+const pathIndex = new Set();
+
+function walk(dir, prefix = '') {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (IGNORED_DIRS.has(entry.name)) continue;
+    const rel = prefix === '' ? entry.name : prefix + '/' + entry.name;
+    if (entry.isDirectory()) {
+      walk(join(dir, entry.name), rel);
+    } else {
+      fileIndex.add(entry.name);
+      pathIndex.add(rel);
+    }
+  }
+}
+walk('.');
+
+/**
+ * 判断文档里引用的文件是否存在。
+ *
+ * 三档匹配，由严到宽：
+ *   1. 完整相对路径命中（`src/lib/storage.ts`）
+ *   2. 文件名在仓库里任何位置存在（`storage.ts`）
+ *   3. 后缀形态的统称（`.sandplay.json` / `.symbolpack.json`）——
+ *      这是**格式名**不是文件名，只要有同后缀的样例就算成立
+ */
+function referenceExists(rel) {
+  if (PROPOSED_FILES.has(rel)) return true;
+  if (pathIndex.has(rel.replace(/^\.\//, ''))) return true;
+  const baseName = rel.split('/').pop() ?? rel;
+  if (fileIndex.has(baseName)) return true;
+  /* 后缀统称：`.sandplay.json` 这类没有主名的写法 */
+  if (/^\.[a-z0-9.]+$/.test(baseName)) {
+    return [...fileIndex].some((name) => name.endsWith(baseName));
+  }
+  return false;
+}
+
+const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+let linkFailures = 0;
+
+console.log('');
+console.log('文档路径与命令一致性审计');
+console.log('');
+
+for (const docPath of DOCS_TO_SCAN) {
+  let text;
+  try {
+    text = readFileSync(docPath, 'utf8');
+  } catch {
+    console.log('  ✗ ' + docPath + ' 读不到');
+    linkFailures += 1;
+    continue;
+  }
+
+  /* 1. 反引号里形如路径的东西 */
+  const referenced = [
+    ...text.matchAll(/`([A-Za-z0-9_./@-]+\.(?:md|ts|tsx|mjs|json|yml))`/g),
+  ].map((m) => m[1]);
+
+  const missing = [];
+  for (const rel of [...new Set(referenced)]) {
+    if (!referenceExists(rel)) missing.push(rel);
+  }
+
+  /*
+   * 2. `npm run xxx` 里的脚本必须真的存在。
+   *
+   * 注意排除 `npm run audit:` 这种**前缀写法** —— 文档里常写
+   * 「`npm run audit:i18n` / `audit:css`」来指一组脚本，
+   * 正则会把结尾的冒号吃掉，得到一个叫 `audit:` 的假脚本名。
+   * 只要是「一组脚本的统称」，就不该判红。
+   */
+  const npmScripts = [...text.matchAll(/npm run ([a-z][a-z0-9:_-]*)/g)].map((m) => m[1]);
+  const missingScripts = [...new Set(npmScripts)].filter(
+    (name) =>
+      !(name in pkg.scripts) &&
+      /* 以冒号结尾 = 一组脚本的前缀，不是具体脚本名 */
+      !name.endsWith(':') &&
+      /* 或者确实是某几个脚本的公共前缀 */
+      !Object.keys(pkg.scripts).some((real) => real.startsWith(name + ':')),
+  );
+
+  if (missing.length === 0 && missingScripts.length === 0) {
+    console.log('  ✓ ' + docPath);
+  } else {
+    linkFailures += 1;
+    console.log('  ✗ ' + docPath);
+    for (const rel of missing) console.log('      引用不存在的文件：' + rel);
+    for (const name of missingScripts) console.log('      引用不存在的 npm 脚本：' + name);
+  }
+}
+
+console.log('');
+if (linkFailures > 0) {
+  console.error('✗ ' + linkFailures + ' 个文档引用了不存在的东西');
+  console.error('');
+  console.error('  修法：要么补上被引用的文件/脚本，要么改文档。');
+  console.error('  不要往 PROPOSED_FILES 白名单里塞 —— 那是给"提议新建"用的，');
+  console.error('  塞错了就等于把这条审计关掉了。');
+  process.exit(1);
+}
+
+console.log('✓ 全部 ' + checks.length + ' 项文档数字与代码一致，' +
+  DOCS_TO_SCAN.length + ' 个文档的引用全部有效');

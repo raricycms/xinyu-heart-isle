@@ -86,10 +86,45 @@ function check(name, ok, detail) {
   }
 }
 
-/* ── 用例 4：恢复后必须重新变绿 ──────────────────────────────── */
+/* ── 用例 4：文档引用了不存在的文件 → 必须红 ──────────────────── */
+/*
+ * 这一类错误和"数字不对"是同一族幽灵：文档层的事实错误。
+ * 但它的检测规则更宽（递归找文件名、后缀统称也算），
+ * 宽规则最容易的失败方式是**变成恒真** —— 什么都能匹配上。
+ * 所以必须实测三种变体。
+ */
+{
+  const p = 'GOOD_FIRST_ISSUES.md';
+  const original = readFileSync(p, 'utf8');
+  try {
+    /* 4a 引用不存在的文件 */
+    writeFileSync(p, original + '\n见 `scripts/no-such-file-abc123.mjs`。\n', 'utf8');
+    let r = runAudit();
+    check('引用不存在的文件时退出 1', r.code === 1, 'code=' + r.code);
+    check('报出缺失的文件名', r.out.includes('no-such-file-abc123'), r.out.slice(-200));
+
+    /* 4b 文件名拼错（真实文件名的近似写法，最容易漏判） */
+    writeFileSync(p, original + '\n见 `storage.tsx`（真名 storage.ts）。\n', 'utf8');
+    r = runAudit();
+    check('文件名拼错时退出 1', r.code === 1, 'code=' + r.code);
+    check('报出拼错的名字', r.out.includes('storage.tsx'), r.out.slice(-200));
+
+    /* 4c 引用不存在的 npm 脚本 */
+    writeFileSync(p, original + '\n跑 `npm run no:such:script:abc123`。\n', 'utf8');
+    r = runAudit();
+    check('引用不存在的 npm 脚本时退出 1', r.code === 1, 'code=' + r.code);
+    check('报出缺失的脚本名', r.out.includes('no:such:script:abc123'), r.out.slice(-200));
+  } finally {
+    writeFileSync(p, original, 'utf8');
+  }
+}
+
+/* ── 用例 5：恢复后必须重新变绿 ──────────────────────────────── */
 {
   const r = runAudit();
   check('变异全部还原后重新通过', r.code === 0, 'code=' + r.code + ' ' + r.out.slice(-150));
+  check('GOOD_FIRST_ISSUES.md 无注入标记残留',
+    !readFileSync('GOOD_FIRST_ISSUES.md', 'utf8').includes('<!-- 变异 -->'));
 }
 
 console.log('');

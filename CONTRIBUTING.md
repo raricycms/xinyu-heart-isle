@@ -200,8 +200,12 @@ npm run typecheck  # TypeScript 严格检查（应用 + scripts/）
 npm run test       # 单元 + 性能测试（vitest）
 npm run build      # 生产构建
 npm run preview    # 预览构建产物
-npm run check      # 一键跑全部 7 道门禁
+npm run check      # 一键跑全部门禁（类型、幽灵字段、i18n、CSS、文档数字、构建、体积、单测、两份校验器、E2E、视觉、渲染性能、a11y、首屏性能）
 ```
+
+> **`npm run e2e` 不会先构建** —— 它跑的是已有的 `dist/`。
+> 单独跑 E2E 前必须先 `npx vite build`，否则你测的是上一次的产物，
+> 表现是"新写的功能在测试里完全不存在"。
 
 ---
 
@@ -210,13 +214,19 @@ npm run check      # 一键跑全部 7 道门禁
 ```bash
 npx tsc -b --noEmit        # 必须 0 错误
 npx vitest run             # 必须全绿
-npx vite build             # 必须通过；主包 gzip ≤ 175KB
+npx vite build             # 必须通过
+npx vite build && npm run audit:budget   # 首屏 JS gzip ≤ 200KB（VISION §5.9）
 ```
 
 改了格式相关的东西，还要跑：
 
 ```bash
+# 会话格式
 node --experimental-strip-types scripts/validate-session.ts samples/example.sandplay.json samples/surface-demo.sandplay.json
+
+# 沙具包格式（自己校验自己改的东西，好包必须过、坏包必须红）
+npm run validate:pack -- samples/example.symbolpack.json
+npm run validate:pack:self-test
 ```
 
 预期退出码 `0`。如果改了 `docs/FORMAT.md` 里的字段说明，请**同时**核对：
@@ -225,7 +235,16 @@ node --experimental-strip-types scripts/validate-session.ts samples/example.sand
 - `public/schema/sandplay-session-v1.schema.json`；
 - `samples/` 里的样例。
 
-这四者必须一致。文档写错但校验器对，会让所有外部工具作者踩坑。
+改了 `docs/SYMBOL_PACK.md` 或 `src/sandbox/library/packs.ts`，则要核对：
+
+- `src/sandbox/library/packs.ts` 的 `validatePack()`（**唯一事实来源**，
+  CLI 只是它的 IO 外壳，绝不复制规则）；
+- `docs/SYMBOL_PACK.md` 里的每个上限数字；
+- `samples/example.symbolpack.json` 与 `samples/broken.symbolpack.json`。
+
+**这几方必须一致。** 文档写错但校验器对，会让所有外部工具作者踩坑；
+校验器写错但文档对，会让人做出"按文档合法、却装不上"的包。
+`npm run validate:pack:self-test` 会核对文档与代码的常量是否一致。
 
 ---
 
