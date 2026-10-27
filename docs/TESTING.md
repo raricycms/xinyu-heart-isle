@@ -1564,18 +1564,81 @@ AST 精确，但会让门禁依赖 `typescript` 包的内部 API ——
 > **出事了会有什么后果**。只写"没覆盖"是没有信息量的 ——
 > 读的人会以为它不重要，然后在这个缺口上搬石头。
 
-#### 6.2.1 React hook 行为
+#### 6.2.1 React hook 行为 —— 补上了「白屏」这一半
 
-**缺口**：`environment: 'node'`，没有 jsdom。`useSyncExternalStore`
+**原缺口**：`environment: 'node'`，没有 jsdom。`useSyncExternalStore`
 的引用稳定性靠 `getPreferences()` 的 `toBe` + `getItemCalls` 缓存命中数
 间接验证，**不是**真实组件挂载。
 
-**什么情况下会出事**：改 `useSyncExternalStore` 的 `getSnapshot` 让它
-每次返回新对象（典型写法 `return {...state}`），组件会无限重渲染。
+**真风险在哪**：改 `getSnapshot` 让它每次返回新对象（典型写法
+`return {...state}`），组件会无限重渲染，**整页白屏，只在真实浏览器里白，
+单测全绿**。
 
-**后果**：**整页白屏**，且只在真实浏览器里白。单测全绿。
-E2E 的 12 个场景会兜住 —— 但只在 E2E 跑到的 12 条路径上。
-新加的路由如果没进 E2E，白屏就没人发现。
+原文接着写了一句关键的话：
+
+> E2E 的 12 个场景会兜住 —— 但只在 E2E 跑到的路径上。
+> **新加的路由如果没进 E2E，白屏就没人发现。**
+
+本轮实测确认这个缺口是真的：
+
+| 门禁 | 覆盖路由数 | 会查白屏吗 |
+| --- | --- | --- |
+| E2E（`smoke.ts`） | 7 / 15 | 间接（点不动就失败） |
+| `a11y.ts` | 15 / 15 | ❌ 只查无障碍属性 |
+| 单测 | — | ❌ node 环境无 DOM |
+
+也就是说 `/resources`、`/toolbox/breathing-478`、各种 `:id` 页面
+如果白屏，**现有门禁全绿**。
+
+##### 新增门禁：`scripts/audit/routes-health.mjs`（`npm run audit:routes`）
+
+15 条路由 × 7 项断言 = **105 项**：
+
+1. `<main>` 存在
+2. `<main>` 内文本量 ≥ 20 字（排除空壳）
+3. `<main>` **真有尺寸**（`getBoundingClientRect` > 100×100）
+4. `<main>` 计算样式可见（`display` / `visibility` / `opacity`）
+5. `<main>` 里有非零尺寸的可见子元素
+6. `document.title` 非空
+7. 无未捕获运行时错误（`pageerror`）
+
+##### 这里被自己的变异验证红了一次，值得单记
+
+第一版只查 1、2、6，文本量用 `main.innerText`。直觉上 `innerText`
+会跳过隐藏元素，所以看起来没问题。
+
+变异验证时把 `<main>` 改成 `display:none`（模拟"整块没显示"），
+**105 项检查照样全绿**。
+
+实测 Chrome 的真实语义：
+
+| 形态 | `innerText` 长度 |
+| --- | --- |
+| 正常可见 | 38 |
+| **`display:none`** | **37（不为 0！）** |
+| `visibility:hidden` | 0 |
+
+`display:none` 是最常见的"整块没显示"，用 `innerText` 判定却是绿的。
+**断言的形状对，但它验证的东西不是用户看到的东西。**
+
+修法：
+
+- 加第 3、4 条几何与样式断言（`getBoundingClientRect` 对
+  `display:none` 返回全 0）
+- 文本量改用 `textContent`，让「有没有内容」和「是否可见」
+  成为两个独立维度 —— 哪个坏了都能指出是哪个
+
+##### 变异验证：`scripts/audit/routes-health-self-test.mjs`（13 项）
+
+三种白屏形态，都会让门禁变红：
+
+- `<main>` `display:none`（抓出上面那个漏洞的正是它）
+- `<main>` `visibility:hidden`
+- 页面组件抛异常（`pageerror`）
+
+**没做的事**：不真的注入 `getSnapshot` 那个 bug —— 它会导致
+无限重渲染，浏览器可能直接卡死，变异验证本身不可控。
+上面三种形态覆盖了"白屏"的可观测后果，已经足够证明门禁有效。
 
 #### 6.2.2 样式与视觉
 
@@ -1853,10 +1916,11 @@ const { idbAvailable } = await import('./idb');
 #### 6.2.10 一句话总结
 
 上面 9 条里，**6.2.6（读屏）和 6.2.5（跨浏览器）是"永远无法自动化"的**，
-必须靠人工验收；**6.2.7（键盘）已修复、6.2.8（IndexedDB 降级）已补测、
+必须靠人工验收；**6.2.1（React hook 行为）补上了「白屏」这一半、
+6.2.7（键盘）已修复、6.2.8（IndexedDB 降级）已补测、
 6.2.4（内存）补上了静态可查的那一半、6.2.9（长会话）的核心风险
-已覆盖**（v2.0 收尾补上，见各自小节）；其余 3 条是"知道有风险，
-且已有间接防线，但防线不厚"。
+已覆盖**（v2.0 收尾补上，见各自小节）；其余 2 条（6.2.2 视觉漂移、
+6.2.3 3D 运行时性能）是**刻意不加门禁**，理由各自写明。
 
 判断某个缺口要不要现在补的标准不是"重要不重要"，
 而是**"出事时用户是否会发现并报告"**。静默丢数据最危险，
@@ -1973,6 +2037,10 @@ jobs:
       # ---- 内存泄漏（§6.2.4 静态可查的那一半）----
       - run: node scripts/audit/leak-listeners.mjs          # 每个监听器/计时器都有清理吗
       - run: node scripts/audit/cache-limit-self-test.mjs   # 缓存上限的测试真的会红吗
+
+      # ---- 白屏（§6.2.1）----
+      - run: node scripts/audit/routes-health.mjs           # 15 条路由都真的渲染出东西了吗
+      - run: node scripts/audit/routes-health-self-test.mjs # 白屏的三种形态会让门禁变红吗
 
       # ---- 格式校验器（两份格式都要双向验证）----
       - run: node scripts/audit/validate-pack-self-test.mjs # 沙具包校验器：好包过、坏包红、文档一致
