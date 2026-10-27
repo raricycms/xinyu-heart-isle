@@ -269,7 +269,12 @@
 .wb-stage > .wb-stage__empty,
 .wb-stage > .ss-toolbar,
 .wb-stage > .wb-silence,
-.wb-stage > .wb-silence--floating {
+.wb-stage > .wb-silence--floating,
+/* 视图控件与方位罗盘也是浮动面板 —— 同样必须放开尺寸，
+   否则会被 `.wb-stage > *` 撑成 100%×100% 盖住整块画布。 */
+.wb-stage > .view-controls,
+.wb-stage > .view-compass,
+.wb-stage > .view-hint {
   height: auto;
 }
 

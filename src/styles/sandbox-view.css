@@ -1,0 +1,277 @@
+/*
+ * 视图变换控件（缩放 / 旋转 / 复位）+ 方位罗盘 + 手势提示
+ *
+ * 归属：VISION §5.7「移动端手势：双指缩放/旋转」（P0）。
+ * v2.0 收尾时才发现这一项只做了「长按」，缩放和旋转从来没有。
+ */
+
+.view-controls {
+  position: absolute;
+  /*
+   * 位置：右上角，**在徽标下方**。
+   *
+   * 一开始放在右下角，实测发现按钮跑到视口外（y=919 > viewport 900）：
+   * 舞台本身就比一屏高，右下角的绝对定位元素要滚动才看得见。
+   * 而「视图操作」是随时可能用到的常驻控件，不能需要先滚动才出现。
+   *
+   * 右上角与徽标（左上）错开，也不压住右下角的沙面工具条。
+   */
+  right: var(--sp-3);
+  top: calc(var(--sp-2) + 34px);
+  z-index: 12;
+  /*
+   * 显式 width: auto 是必需的，不是冗余。
+   * `sandbox-workbench.css` 里的 `.wb-stage > *` 会给出 `width: 100%`
+   * （优先级 0,2,0，比这里的 0,1,0 高），不覆盖就会被撑满整个舞台 ——
+   * 表现是「点画布没反应」，因为控件是一整块透明面板盖在上面。
+   * 这个坑在检查器 / 工具条上已经踩过一次，注释见那处。
+   */
+  width: auto;
+  height: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--c-line);
+  background: rgba(255, 253, 250, 0.92);
+  backdrop-filter: blur(10px) saturate(1.4);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  box-shadow: var(--shadow-2);
+  /*
+   * 控件浮在渲染层上。`touch-action: auto` 是有意的：
+   * 父级 `.wb-stage` 为了画沙面设了 `touch-action: none`，
+   * 如果控件继承它，按钮的水波纹/长按菜单都会被抑制，手感变木。
+   */
+  touch-action: auto;
+}
+
+.view-controls__btn {
+  /* 44×44：CONTRACT §7 触摸目标。两个方向都要，只写 min-height 会不足。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--ink-700);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.view-controls__btn:hover:not(:disabled) {
+  background: var(--teal-50);
+  color: var(--teal-700);
+}
+
+.view-controls__btn:disabled {
+  color: var(--ink-300);
+  cursor: not-allowed;
+}
+
+.view-controls__value {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 44px;
+  padding: 0 var(--sp-2);
+  border: none;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.view-controls__value.is-active {
+  color: var(--teal-700);
+  font-weight: 600;
+}
+
+.view-controls__value:hover:not(:disabled) {
+  background: var(--teal-50);
+}
+
+.view-controls__value:disabled {
+  cursor: default;
+}
+
+.view-controls__rot {
+  font-size: var(--fs-xs);
+  opacity: 0.75;
+}
+
+.view-controls__divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--c-line);
+}
+
+/* ── 方位罗盘 ──────────────────────────────────────────────── */
+
+/*
+ * 只在视图旋转后出现。旋转是纯视觉的，数据坐标不变；
+ * 不明确画出「哪边是上」，用户会以为摆在左上而数据记在右上。
+ */
+.view-compass {
+  position: absolute;
+  /*
+   * 放在右上角控件组的左边，不占左上（那里是场景/阶段徽标）。
+   */
+  right: calc(var(--sp-3) + 262px);
+  top: calc(var(--sp-2) + 34px);
+  z-index: 12;
+  /* 同上：覆盖 `.wb-stage > *` 的 width/height: 100% */
+  width: 52px;
+  height: 52px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--c-line);
+  background: rgba(255, 253, 250, 0.9);
+  box-shadow: var(--shadow-xs);
+  pointer-events: none;
+  font-size: 10px;
+  color: var(--ink-500);
+}
+
+.view-compass__n,
+.view-compass__e,
+.view-compass__s,
+.view-compass__w {
+  position: absolute;
+  line-height: 1;
+}
+
+.view-compass__n {
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--teal-700);
+  font-weight: 600;
+}
+
+.view-compass__s {
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.view-compass__e {
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.view-compass__w {
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* ── 手势提示 ──────────────────────────────────────────────── */
+
+.view-hint {
+  position: absolute;
+  left: 50%;
+  bottom: var(--sp-3);
+  transform: translateX(-50%);
+  z-index: 13;
+  /* 同上：覆盖 `.wb-stage > *` 的 width/height: 100% */
+  width: auto;
+  height: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: min(320px, calc(100% - 24px));
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-full);
+  border: 1px solid var(--c-line);
+  background: rgba(32, 38, 42, 0.88);
+  color: #fdfbf7;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  box-shadow: var(--shadow-2);
+}
+
+.view-hint__close {
+  /* 44×44 触摸目标；视觉上是小小的 ×，靠 flex 居中 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  margin: -8px -8px -8px 0;
+  border: none;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.view-hint__close:hover {
+  opacity: 1;
+}
+
+/* ── 窄屏 ──────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .view-controls {
+    right: var(--sp-2);
+    top: calc(var(--sp-2) + 30px);
+    gap: 0;
+  }
+
+  .view-controls__divider {
+    display: none;
+  }
+
+  .view-controls__value {
+    /*
+     * min-width 绝不能小于 44px。
+     *
+     * 我第一版写的是 42px（想省两个像素让一排按钮更紧凑），
+     * E2E 的 390px 视口扫描立刻报 `button(42×44)「100%」`。
+     * 那条断言（CONTRACT §7 触摸目标 ≥ 44×44）就是为这种情况存在的 ——
+     * 「100%」三个字符在 11.5px 字号下本身只有约 30px 宽，
+     * 不靠 min-width 撑的话，实际点击区会远小于 44。
+     */
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 var(--sp-1);
+  }
+
+  /*
+   * 手机上一排 6 个按钮会占掉半屏宽度，挤到沙具都看不见。
+   * 只留缩小/比例/放大，旋转靠双指手势 —— 旋转在手机上本来就是
+   * 手势场景，按钮是给桌面和低视力用户的备用入口。
+   */
+  .view-controls__btn[data-testid='view-rotate-left'],
+  .view-controls__btn[data-testid='view-rotate-right'] {
+    display: none;
+  }
+
+  .view-compass {
+    width: 44px;
+    height: 44px;
+    right: calc(var(--sp-2) + 148px);
+    top: calc(var(--sp-2) + 30px);
+  }
+
+  .view-hint {
+    bottom: 72px;
+    font-size: 11px;
+  }
+}

@@ -810,6 +810,152 @@ const scenarios: Scenario[] = [
         }
 
         /*
+         * 视图缩放 / 旋转（VISION §5.7 P0「移动端手势」）。
+         *
+         * 这一段的存在理由：§5.7 把「双指缩放/旋转」列为 P0，但 v2.0
+         * 收尾时才发现只做了「长按菜单」—— 缩放和旋转从来没实现过，
+         * 也没人发现，因为没有断言在看。
+         *
+         * 这里必须断言的三件事，缺一不可：
+         *   1. 控件存在且有 aria-label（否则读屏用户不知道这是干什么的）
+         *   2. 点了之后 transform 真的变了（防「按钮摆了但没接线」）
+         *   3. 放大后命中测试仍然准（防「能放大但拖拽落点偏移」）
+         * 第 3 条是关键：渲染器原本用 getBoundingClientRect() 测量，
+         * 而它返回变换后的包围盒，旋转 90° 会宽高互换。
+         */
+        const viewLayer = await page.$('[data-testid="sandbox-view-layer"]');
+        expectTrue('视图变换层存在', viewLayer !== null, '找不到 sandbox-view-layer');
+
+        const transformOf = async (): Promise<string> => {
+          const node = await page.$('[data-testid="sandbox-view-layer"]');
+          if (!node) return 'missing';
+          return node.evaluate((el) => getComputedStyle(el).transform);
+        };
+
+        const beforeTransform = await transformOf();
+        expectTrue(
+          '初始视图无变换',
+          beforeTransform === 'none',
+          beforeTransform,
+        );
+
+        // 控件必须可点，且不能撑满舞台（撑满会盖住画布导致点不动）
+        const controlsGeom = await page.evaluate(() => {
+          const el = document.querySelector('[data-testid="view-controls"]');
+          const stage = document.querySelector('[data-testid="sandbox-stage"]');
+          if (!el || !stage) return null;
+          const a = el.getBoundingClientRect();
+          const b = stage.getBoundingClientRect();
+          return { ratio: a.width / b.width, w: Math.round(a.width) };
+        });
+        expectTrue(
+          '视图控件没有撑满舞台（否则会盖住画布）',
+          controlsGeom !== null && controlsGeom.ratio < 0.9,
+          JSON.stringify(controlsGeom),
+        );
+
+        // 放大
+        await page.evaluate(() => {
+          document.querySelector<HTMLElement>('[data-testid="view-zoom-in"]')?.click();
+        });
+        await new Promise((resolve) => setTimeout(resolve, 320));
+        const afterZoom = await transformOf();
+        expectTrue(
+          '点放大后 transform 变成缩放矩阵',
+          afterZoom !== 'none' && afterZoom !== beforeTransform,
+          afterZoom,
+        );
+
+        // 比例显示要跟着变（防「transform 变了但 UI 没反馈」）
+        const scaleLabel = await page.$eval(
+          '[data-testid="view-reset"]',
+          (node) => (node.textContent ?? '').trim(),
+        );
+        expectTrue(
+          '比例显示跟着变成 125%',
+          scaleLabel.startsWith('125%'),
+          scaleLabel,
+        );
+
+        /*
+         * 关键断言：放大状态下摆沙具必须仍然落点正确。
+         *
+         * 只测「transform 变了」会漏掉最危险的 bug ——
+         * 渲染器内部的坐标换算没做逆变换时，画布看起来正常放大，
+         * 但拖拽和笔刷的落点会偏。这里用「计数 +1」做一个最低限度的
+         * 兜底（真正的精度在 view/measure.test.ts 里用数学钉死）。
+         */
+        const countBeforeZoomPlace = await page.$eval(
+          '[data-testid="sandbox-item-count"]',
+          (node) => {
+            const m = (node.textContent ?? '').match(/(\d+)/);
+            return m ? Number(m[1]) : -1;
+          },
+        );
+        await page.evaluate(() => {
+          document.querySelector<HTMLElement>('[data-testid="lib-item"]')?.click();
+        });
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        const countAfterZoomPlace = await page.$eval(
+          '[data-testid="sandbox-item-count"]',
+          (node) => {
+            const m = (node.textContent ?? '').match(/(\d+)/);
+            return m ? Number(m[1]) : -1;
+          },
+        );
+        expectTrue(
+          '放大状态下仍然能摆进沙具（坐标换算没坏）',
+          countAfterZoomPlace === countBeforeZoomPlace + 1,
+          `之前 ${countBeforeZoomPlace}，之后 ${countAfterZoomPlace}`,
+        );
+
+        // 旋转 → 方位罗盘必须出现（旋转是纯视觉的，必须告知方位）
+        await page.evaluate(() => {
+          document.querySelector<HTMLElement>('[data-testid="view-rotate-right"]')?.click();
+        });
+        await new Promise((resolve) => setTimeout(resolve, 320));
+        const compass = await page.$('[data-testid="view-compass"]');
+        expectTrue(
+          '旋转后出现方位罗盘（否则用户会误判方位）',
+          compass !== null,
+          '找不到 view-compass',
+        );
+        const compassText = compass
+          ? ((await compass.evaluate((el) => el.textContent ?? '')).trim())
+          : '';
+        expectTrue(
+          '罗盘显示四个方位字',
+          compassText.length >= 4,
+          compassText,
+        );
+
+        // 复位
+        await page.evaluate(() => {
+          document.querySelector<HTMLElement>('[data-testid="view-reset"]')?.click();
+        });
+        await new Promise((resolve) => setTimeout(resolve, 320));
+        const afterReset = await transformOf();
+        expectTrue('复位后回到无变换', afterReset === 'none', afterReset);
+        expectTrue(
+          '复位后罗盘消失',
+          (await page.$('[data-testid="view-compass"]')) === null,
+          '罗盘仍在',
+        );
+
+        // 键盘入口：不能只有触摸能用（低视力用户更需要放大）
+        await page.keyboard.press('+');
+        await new Promise((resolve) => setTimeout(resolve, 260));
+        const afterKeyZoom = await transformOf();
+        expectTrue('键盘 + 也能放大（不是只有触摸能用）', afterKeyZoom !== 'none', afterKeyZoom);
+        await page.keyboard.press('0');
+        await new Promise((resolve) => setTimeout(resolve, 260));
+        expectTrue(
+          '键盘 0 能复位',
+          (await transformOf()) === 'none',
+          '复位失败',
+        );
+
+        /*
          * 复位页面滚动。
          * 上面的点击会把整页滚到 450px，把工作台工具栏顶到 sticky
          * 导航条底下 —— 后面的沙声开关就点不到了（点击被导航链接接走）。

@@ -23,9 +23,12 @@ import { Toolbar } from '@/sandbox/workbench/Toolbar';
 import { Inspector } from '@/sandbox/workbench/Inspector';
 import { PromptCard, SavePanel, LockDialog, SandboxAffect } from '@/sandbox/workbench/SidePanels';
 import { SurfaceToolbar, SilenceToggle } from '@/sandbox/surface';
+import { ViewControls, ViewCompass, GestureHint } from '@/sandbox/view/ViewControls';
+import { useViewTransform } from '@/sandbox/view/useViewTransform';
 import { renderThumbnail } from '@/sandbox/thumbnail';
 import { useI18n } from '@/i18n';
 import '@/styles/sandbox-workbench.css';
+import '@/styles/sandbox-view.css';
 
 /**
  * 沙盘工作台（v2）。
@@ -116,6 +119,34 @@ export default function SandboxPage() {
   const [lockOpen, setLockOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const restoredRef = useRef(false);
+
+  /*
+   * 视图变换（缩放/旋转/平移）—— VISION §5.7 P0「移动端手势」。
+   *
+   * ref 挂在外层 `.wb-stage`：手势坐标换算要用它的 `getBoundingClientRect()`，
+   * 而这层尺寸不随 transform 变（transform 只影响绘制，不改布局盒）。
+   *
+   * `disabled` 的理由：three 渲染器自带视角控制（拖动旋转），
+   * 再叠一层 CSS transform 会出现「拖了但方向不对」的双重变换。
+   */
+  const stageGestureRef = useRef<HTMLDivElement | null>(null);
+  const view = useViewTransform(stageGestureRef, { disabled: renderer === 'three' });
+  /** 手势提示一次性，只是帮用户发现「原来可以缩放」 */
+  const [gestureHintDismissed, setGestureHintDismissed] = useState(false);
+  /*
+   * 是否触屏设备。
+   *
+   * 用 `maxTouchPoints` 而不是 UA 字符串：UA 已经被各种浏览器改写得不靠谱，
+   * 而 `navigator.maxTouchPoints > 0` 是标准能力探测，触屏笔记本也会命中
+   * （那正是我们想要的 —— 触屏笔记本同样能双指操作）。
+   *
+   * 放在 effect 里读而不是 useState 初值：非浏览器环境（vitest 的 node 环境）
+   * 没有 `navigator`，摆在初值里会抛。
+   */
+  const [hasTouch, setHasTouch] = useState(false);
+  useEffect(() => {
+    setHasTouch(typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+  }, []);
 
   const items = api.state.items;
   const selected = useMemo(
@@ -490,50 +521,103 @@ export default function SandboxPage() {
 
         {/* 舞台 */}
         <div className="wb-col wb-col--stage">
-          <div className="wb-stage" data-testid="sandbox-stage">
+          <div
+            className="wb-stage"
+            data-testid="sandbox-stage"
+            ref={stageGestureRef}
+            {...view.handlers}
+          >
             <div className="wb-stage__badge">
               <span>{t(`sandbox.scene.${api.state.sceneId}` as const) ?? api.state.sceneId}</span>
               <span aria-hidden="true">·</span>
               <span>{api.locked ? t('sandbox.locked') : t(`sandbox.phase.${api.state.phase}` as const)}</span>
             </div>
 
-            <SandRendererSwitch
-              renderer={renderer}
-              items={items}
-              sceneId={api.state.sceneId}
-              selectedId={selectedId}
-              surface={api.surface}
-              readOnly={api.locked}
-              imageMap={packImages}
-              reducedMotion={prefs?.reducedMotion ?? false}
-              outlineMode={prefs?.outlineMode ?? false}
-              brush={
-                tool && !api.locked
-                  ? { x: 0.5, y: 0.5, radius, tool, active: false }
-                  : null
-              }
-              onSelect={setSelectedId}
-              onItemDrag={handleItemDrag}
-              /*
-               * ⚠️ 必须把 `to` 传进去。原来这里写成
-               *   `onItemCommit={(id) => { ... commitMove(id, {x:item.x,y:item.y}, {x:item.x,y:item.y}) }}`
-               * 即只用 `id`，from/to 都取**当前坐标** —— 于是「移动」被提交成
-               * 一次原地不动的事件。拖动还能靠 `onItemDrag` 实时改坐标掩盖住，
-               * 但**键盘方向键微调完全没有中间态**，它唯一的落点就是这里：
-               * 按方向键 → 坐标算好了 → 提交成原地 → 位置不变。
+              {/*
+               * 视图变换包裹层。
                *
-               * 结果是 dom2d 里那段 `handleKeyDown`（方向键 0.02 / Shift 0.1）
-               * 从来没真正生效过，而它是键盘用户调整摆件位置的**唯一**途径。
-               * 这个 bug 是 E2E 键盘全流程抓出来的：断言「方向键后 style.left 变了」
-               * 连续两次读到同一个 45%。
-               */
-              onItemCommit={(id, from, to) => {
-                api.commitMove(id, from, to);
-              }}
-              onItemActivate={(item) => setSelectedId(item.id)}
-              onSurfaceStroke={handleSurfaceStroke}
-              onCanvasClick={() => setSelectedId(null)}
-            />
+               * **旋转是纯视觉的**：`items` 的 x/y 永远是未旋转的托盘坐标，
+               * 只有这一层被 CSS transform 转。九宫格区域统计按原坐标算，
+               * 所以「用户看到的方位」和「数据记录的方位」不会错位 ——
+               * 这正是 `ViewCompass` 存在的理由（旋转后画出哪边是上）。
+               *
+               * 手势绑在外层 `.wb-stage` 而不是这一层：外层尺寸稳定，
+               * `screenToSandbox` 要用它的 `getBoundingClientRect()` 做逆变换。
+               */}
+              <div
+                className="wb-stage__view"
+                data-testid="sandbox-view-layer"
+                /*
+                 * 这个属性是渲染器坐标换算的**契约**：
+                 * `measureSandboxElement()` 靠 `closest([data-sandbox-view-host])`
+                 * 找到变换宿主，再用它的矩阵逆运算还原未变换矩形。
+                 * 没有它，旋转后命中测试会整体偏移（实测过）。
+                 */
+                data-sandbox-view-host=""
+                style={view.style}
+              >
+                <SandRendererSwitch
+                renderer={renderer}
+                items={items}
+                sceneId={api.state.sceneId}
+                selectedId={selectedId}
+                surface={api.surface}
+                readOnly={api.locked}
+                imageMap={packImages}
+                reducedMotion={prefs?.reducedMotion ?? false}
+                outlineMode={prefs?.outlineMode ?? false}
+                brush={
+                  tool && !api.locked
+                    ? { x: 0.5, y: 0.5, radius, tool, active: false }
+                    : null
+                }
+                onSelect={setSelectedId}
+                onItemDrag={handleItemDrag}
+                /*
+                 * ⚠️ 必须把 `to` 传进去。原来这里写成
+                 *   `onItemCommit={(id) => { ... commitMove(id, {x:item.x,y:item.y}, {x:item.x,y:item.y}) }}`
+                 * 即只用 `id`，from/to 都取**当前坐标** —— 于是「移动」被提交成
+                 * 一次原地不动的事件。拖动还能靠 `onItemDrag` 实时改坐标掩盖住，
+                 * 但**键盘方向键微调完全没有中间态**，它唯一的落点就是这里：
+                 * 按方向键 → 坐标算好了 → 提交成原地 → 位置不变。
+                 *
+                 * 结果是 dom2d 里那段 `handleKeyDown`（方向键 0.02 / Shift 0.1）
+                 * 从来没真正生效过，而它是键盘用户调整摆件位置的**唯一**途径。
+                 * 这个 bug 是 E2E 键盘全流程抓出来的：断言「方向键后 style.left 变了」
+                 * 连续两次读到同一个 45%。
+                 */
+                onItemCommit={(id, from, to) => {
+                  api.commitMove(id, from, to);
+                }}
+                onItemActivate={(item) => setSelectedId(item.id)}
+                onSurfaceStroke={handleSurfaceStroke}
+                onCanvasClick={() => setSelectedId(null)}
+                />
+              </div>
+
+              {/*
+               * 视图控件放在**变换层之外**：如果在里面，它们会跟着一起
+               * 缩放旋转，按钮就会跑到画布外或者变成歪的。
+               * 它们必须始终在屏幕上的固定位置。
+               */}
+              <ViewCompass rotate={view.view.rotate} />
+              <ViewControls
+                view={view.view}
+                onZoomIn={view.zoomIn}
+                onZoomOut={view.zoomOut}
+                onRotate={view.rotateBy}
+                onReset={view.reset}
+                disabled={renderer === 'three'}
+              />
+              {/*
+               * 手势提示：只在触屏设备、且用户还没关掉时显示。
+               * 「有这个功能」和「用户知道有这个功能」是两件事 ——
+               * 双指缩放是移动端通用手势，但沙盘是画布，用户会默认
+               * 「拖就是画」，未必想到能缩放。
+               */}
+              {hasTouch && !gestureHintDismissed ? (
+                <GestureHint onDismiss={() => setGestureHintDismissed(true)} />
+              ) : null}
 
             {items.length === 0 && !api.locked ? (
               <div className="wb-stage__empty">

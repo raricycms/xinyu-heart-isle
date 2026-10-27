@@ -3,6 +3,7 @@ import type { SandboxItem } from '@/lib/types';
 import { getScene } from '@/sandbox/scenes';
 import { symbolLabel } from '@/sandbox/symbols';
 import { glyphFor, imageFor } from '@/sandbox/render/symbolSource';
+import { measureSandboxGeometry } from '@/sandbox/view/measure';
 import type { SandRendererProps } from '@/sandbox/render/types';
 
 /**
@@ -44,12 +45,18 @@ export function Dom2DRenderer({
   const toNormalized = (clientX: number, clientY: number): { x: number; y: number } | null => {
     const el = surfaceRef.current;
     if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return null;
-    return {
-      x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)),
-    };
+    /*
+     * 必须用 `measureSandboxGeometry(...).normalized` 而不是
+     * `el.getBoundingClientRect()` 手算归一化。
+     *
+     * 视图缩放/旋转用 CSS transform 作用在渲染器外层，而
+     * `getBoundingClientRect()` 返回的是**变换后**的包围盒：
+     *   - 旋转 90° 时宽高互换（实测 802×601 → 601×802），坐标整体偏移；
+     *   - 放大时 屏幕 75% 处应对应托盘 0.625，直算会得到 0.75。
+     * 表现是「拖 A 摆件，落点在 B」，且中心附近测不出来。
+     * 详见 `src/sandbox/view/measure.ts`。
+     */
+    return measureSandboxGeometry(el).normalized(clientX, clientY);
   };
 
   const handlePointerDown = (event: React.PointerEvent, item: SandboxItem) => {

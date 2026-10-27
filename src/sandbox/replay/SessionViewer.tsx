@@ -168,10 +168,17 @@ export function SessionViewer({
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
 
-    const rect = wrap.getBoundingClientRect();
+    /*
+     * 用布局尺寸而不是 `getBoundingClientRect()`。
+     *
+     * 回放视图目前没有视图变换，两者等价；但 `offsetWidth` 是不受任何
+     * 祖先 transform 影响的「逻辑尺寸」，而 rect 会跟着变换走。
+     * 沙盘工作台那边的渲染器就因为 rect 在旋转后宽高互换而踩过坑，
+     * 这里统一用更稳的那个，避免以后加变换时再踩一次。
+     */
+    const width = Math.max(240, Math.floor(wrap.offsetWidth));
+    const heightPx = Math.max(180, Math.floor(wrap.offsetHeight));
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const width = Math.max(240, Math.floor(rect.width));
-    const heightPx = Math.max(180, Math.floor(rect.height));
     // 只在尺寸真的变了时改 canvas.width（改它等于清空 + 重新分配）
     const nextW = Math.floor(width * dpr);
     const nextH = Math.floor(heightPx * dpr);

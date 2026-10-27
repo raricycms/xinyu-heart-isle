@@ -4,6 +4,7 @@ import { glyphFor, imageFor, imageReady, loadImage } from '@/sandbox/render/symb
 import { computeSandCells, glossFill, GLOSS_H_RATIO, GLOSS_INSET_X, GLOSS_INSET_Y, GLOSS_W_RATIO } from '@/sandbox/surface/sandCells';
 import type { SandCell, Tray } from '@/sandbox/surface/sandCells';
 import { useBrush } from '@/sandbox/surface/useBrush';
+import { measureSandboxGeometry } from '@/sandbox/view/measure';
 import type { SandboxItem } from '@/lib/types';
 import type { SandRendererProps } from '@/sandbox/render/types';
 
@@ -102,12 +103,23 @@ export function Iso2DRenderer({
     (clientX: number, clientY: number): { x: number; y: number } | null => {
       const wrap = wrapRef.current;
       if (!wrap) return null;
-      const rect = wrap.getBoundingClientRect();
+      /*
+       * 用 `measureSandboxGeometry` 而不是 `getBoundingClientRect()`：
+       * 视图旋转会让 rect 的宽高互换、缩放会让归一化失效，
+       * 而 `.normalized()` 已经把屏幕点逆变换回布局坐标系了。
+       * 详见 `src/sandbox/view/measure.ts`。
+       *
+       * tray 偏移要在**布局坐标系**里减：`geometry.rect` 也是布局坐标，
+       * `geometry.pointer()` 给出的是逆变换后的屏幕点，两者同系。
+       */
+      const geometry = measureSandboxGeometry(wrap);
+      const { rect } = geometry;
       if (rect.width === 0 || rect.height === 0) return null;
       const tray = trayRect(rect.width, rect.height);
+      const p = geometry.pointer(clientX, clientY);
       return {
-        x: Math.min(1, Math.max(0, (clientX - rect.left - tray.x) / tray.w)),
-        y: Math.min(1, Math.max(0, (clientY - rect.top - tray.y) / tray.h)),
+        x: Math.min(1, Math.max(0, (p.x - rect.left - tray.x) / tray.w)),
+        y: Math.min(1, Math.max(0, (p.y - rect.top - tray.y) / tray.h)),
       };
     },
     [trayRect],
@@ -121,10 +133,21 @@ export function Iso2DRenderer({
     if (!canvas || !wrap) return;
 
     const draw = () => {
-      const rect = wrap.getBoundingClientRect();
+      /*
+       * canvas 的像素尺寸要用**布局尺寸**（offsetWidth/Height），
+       * 不能用 `getBoundingClientRect()`：
+       *
+       * 视图变换（缩放/旋转）是 CSS transform 作用在渲染器外层，
+       * 而 rect 会跟着变换走 —— 旋转 90° 时 canvas 会被重设成宽高互换的
+       * 错误尺寸（实测 802×601 变 601×802），画面被拉伸。
+       *
+       * offsetWidth 不受 transform 影响，正是我们想要的「逻辑绘制区」尺寸。
+       * 缩放带来的模糊由浏览器合成层处理（放大 4 倍会略糊，可接受；
+       * 重设 canvas 尺寸反而会让每次缩放都重新绘制整幅画面）。
+       */
+      const width = Math.max(200, Math.floor(wrap.offsetWidth));
+      const height = Math.max(160, Math.floor(wrap.offsetHeight));
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const width = Math.max(200, Math.floor(rect.width));
-      const height = Math.max(160, Math.floor(rect.height));
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       canvas.style.width = `${width}px`;
@@ -154,10 +177,10 @@ export function Iso2DRenderer({
     const canvas = overlayRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
-    const rect = wrap.getBoundingClientRect();
+    // 同上：overlay canvas 也必须用布局尺寸，否则旋转后宽高互换
+    const width = Math.max(200, Math.floor(wrap.offsetWidth));
+    const height = Math.max(160, Math.floor(wrap.offsetHeight));
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const width = Math.max(200, Math.floor(rect.width));
-    const height = Math.max(160, Math.floor(rect.height));
     canvas.width = Math.floor(width * dpr);
     canvas.height = Math.floor(height * dpr);
     canvas.style.width = `${width}px`;

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { symbolGlyph } from '@/sandbox/symbols';
 import { glyphFor, imageFor, imageReady, loadImage } from '@/sandbox/render/symbolSource';
 import { createHeightField, sampleHeight, SURFACE_COLS, SURFACE_ROWS } from '@/sandbox/surfaceCodec';
+import { measureSandboxGeometry } from '@/sandbox/view/measure';
 import type { SandRendererProps } from '@/sandbox/render/types';
 
 /**
@@ -303,9 +304,23 @@ export function ThreeRenderer({
     const state = stateRef.current;
     const mount = mountRef.current;
     if (!state || !mount) return null;
-    const rect = mount.getBoundingClientRect();
-    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
-    const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+    /*
+     * 用 `measureSandboxGeometry` 而不是裸 `getBoundingClientRect()`。
+     *
+     * three 渲染器自带视角控制，页面在 `renderer === 'three'` 时不会叠加
+     * CSS 视图变换 —— 所以当前路径下 `closest` 找不到变换宿主，
+     * 行为与原来完全一致（零成本）。仍然统一走这个函数，是为了将来
+     * 万一有人给它套上变换时坐标不会静默偏移。
+     *
+     * 注意：必须用 `geometry.pointer()` 把屏幕点逆变换回布局坐标系，
+     * 再用 `geometry.rect` 算 NDC。只还原 rect 不还原点，
+     * 在缩放时会得到完全错误的拾取位置。
+     */
+    const geometry = measureSandboxGeometry(mount);
+    const rect = geometry.rect;
+    const p = geometry.pointer(clientX, clientY);
+    const ndcX = ((p.x - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((p.y - rect.top) / rect.height) * 2 + 1;
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), state.camera);
     const hits = raycaster.intersectObjects(state.group.children, false);
