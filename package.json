@@ -43,10 +43,12 @@
     "validate:pack:self-test": "node scripts/audit/validate-pack-self-test.mjs",
     "perf": "node --experimental-strip-types scripts/audit/perf.ts",
     "validate": "node --experimental-strip-types scripts/validate-session.ts",
-    "check": "npm run typecheck:all && npm run audit:ghost && npm run audit:dead && npm run audit:leaks && npm run audit:i18n && npm run audit:css && npm run audit:docs && npm run audit:faq && npm run audit:security && npm run build && npm run audit:budget && npm run test && npm run test:idb:self-test && npm run audit:cache:self-test && npm run validate -- samples/example.sandplay.json && npm run validate:pack -- samples/example.symbolpack.json && npm run e2e && npm run visual && npm run perf:render && npm run a11y && npm run audit:routes && npm run perf && npm run audit:faq:self-test && npm run audit:security:self-test",
+    "check": "npm run typecheck:all && npm run audit:ghost && npm run audit:dead && npm run audit:leaks && npm run audit:i18n && npm run audit:css && npm run audit:docs && npm run audit:faq && npm run audit:security && npm run audit:hygiene && npm run build && npm run audit:budget && npm run test && npm run test:idb:self-test && npm run audit:cache:self-test && npm run validate -- samples/example.sandplay.json && npm run validate:pack -- samples/example.symbolpack.json && npm run e2e && npm run visual && npm run perf:render && npm run a11y && npm run audit:routes && npm run perf && npm run audit:faq:self-test && npm run audit:security:self-test && npm run audit:hygiene:self-test",
     "audit:faq:self-test": "node scripts/audit/faq-claims-self-test.mjs",
     "audit:security": "node scripts/audit/security-claims.mjs",
-    "audit:security:self-test": "node scripts/audit/security-claims-self-test.mjs"
+    "audit:security:self-test": "node scripts/audit/security-claims-self-test.mjs",
+    "audit:hygiene": "node scripts/audit/repo-hygiene.mjs",
+    "audit:hygiene:self-test": "node scripts/audit/repo-hygiene-self-test.mjs"
   },
   "dependencies": {
     "react": "^19.3.1",
