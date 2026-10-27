@@ -88,8 +88,18 @@ function openDb(): Promise<IDBDatabase | null> {
     request.onsuccess = () => done(request.result);
     request.onerror = () => done(null);
     request.onblocked = () => done(null);
-    // 某些环境下 open 既不 success 也不 error，加一个超时兜底
-    window.setTimeout(() => done(null), 3000);
+    /*
+     * 某些环境下 open 既不 success 也不 error，加一个超时兜底。
+     *
+     * 用全局 `setTimeout` 而不是 `window.setTimeout`：
+     * `window` 只在浏览器主线程存在，worker / 测试环境（node）里没有。
+     * 而这个文件的降级逻辑正是要覆盖「环境不正常」的情况 ——
+     * 在兜底分支里再依赖一个可能不存在的全局，等于兜底本身会崩。
+     *
+     * 这是写降级路径测试时暴露出来的：两条用例报
+     * `ReferenceError: window is not defined`。
+     */
+    setTimeout(() => done(null), 3000);
   });
 
   return dbPromise;

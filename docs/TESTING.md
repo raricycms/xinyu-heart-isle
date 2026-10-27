@@ -1676,16 +1676,68 @@ iOS/Safari 占比不低（沙盘师用 iPad 录音）。真机验证已列入
 （`SandboxPage.tsx` L627）—— **Enter 只做选中**，编辑面板是侧栏
 `<Inspector>`，由选中态驱动。断言已改为验真实的选中契约。
 
-#### 6.2.8 IndexedDB 路径
+#### ~~6.2.8 IndexedDB 路径~~ ✅ 已补测
 
-**缺口**：`src/lib/idb.ts` 的降级逻辑未单测（需要真实 IDB）。
+**原缺口**：`src/lib/idb.ts` 的降级逻辑未单测，理由写的是
+「需要真实 IDB」。这句话把一件能测的事说成了不能测的事。
 
-**什么情况下会出事**：用户浏览器禁用 IndexedDB（隐私模式、企业策略），
-降级到 localStorage 的分支走错。
+**修法**：降级逻辑的触发条件是 `typeof indexedDB === 'undefined'` ——
+这**不需要真实 IDB**，只需要把这个全局拿掉：
 
-**后果**：**数据存不下来，且没有报错**。用户摆了一小时沙盘，
-关掉页面全没了。降级逻辑本身有 E2E 覆盖（正常路径），
-但"禁用 IDB"这个配置下没有。
+```ts
+vi.stubGlobal('indexedDB', undefined);
+vi.resetModules();          // idb.ts 用模块级 dbPromise 缓存，必须重置
+const { idbAvailable } = await import('./idb');
+```
+
+`src/lib/idb-fallback.test.ts` 13 项，覆盖：
+
+| 场景 | 断言 |
+| --- | --- |
+| 没有 `indexedDB` | `idbAvailable()` → false；读写客户端/资产/缓存全部降级 |
+| `open()` 直接抛错（Safari 隐私模式） | 不崩，返回 false |
+| `open()` 异步触发 `onerror` | 降级 |
+| **IDB 正常** | `idbAvailable()` → **true** |
+
+最后一行是必须的反向断言：只测「不可用时返回 false」是半张测试 ——
+如果实现写成 `return false`（恒假），那 10 个用例全绿，
+而真实用户（IDB 正常）反而拿不到能力。
+
+**为什么这个缺口重要**：用户浏览器禁用 IndexedDB（隐私模式、
+企业策略）时走这条路。它坏了，症状是**数据存不下来且没有报错** ——
+用户摆了一小时沙盘，关掉页面全没了。静默丢数据是最危险的一类失败。
+
+#### 写这组测试挖出的一个真实缺陷
+
+`idb.ts` 的超时兜底用的是 `window.setTimeout`。`window` 只在浏览器
+主线程存在，**node / worker 里没有** —— 测试一跑就报
+`ReferenceError: window is not defined`。
+
+讽刺的是：这个文件整个存在的意义就是覆盖「环境不正常」的情况，
+而它在**兜底分支**里依赖了一个可能不存在的全局 —— 兜底本身会崩。
+已改为直接用全局 `setTimeout`。
+
+#### 变异验证：`scripts/audit/idb-fallback-self-test.mjs`（13 项）
+
+四个变异点，三个真的会让用例变红：
+
+| 变异 | 结果 |
+| --- | --- |
+| `idbAvailable` 恒返回 `true` | 红 |
+| 去掉 `open()` 的 try/catch | 红，报 `SecurityError` |
+| 把 `setTimeout` 改回 `window.setTimeout` | 红，报 `window is not defined` |
+| 去掉 `typeof indexedDB === 'undefined'` 检查 | **等价变异，保持绿** |
+
+最后一行的意义：「变异没变红」有两种完全不同的含义 ——
+**A. 测试太松（要补断言）**；**B. 变异等价（改了等于没改）**。
+混为一谈的人会去给等价变异补无意义的断言，把测试写脏。
+
+这条等价变异的原因：去掉检查后代码会走 `indexedDB.open(...)`，
+在 node 里抛 ReferenceError，而**紧接着的 try/catch 捕获它**，
+照样 `done(null)` —— 两条路径的可观测行为完全相同。
+
+脚本明确断言「它应该保持绿」。如果哪天它变红了，
+说明有人动了 try/catch 的覆盖范围，那反而是一条值得看的信号。
 
 #### 6.2.9 Stress / 长会话
 
@@ -1704,12 +1756,17 @@ iOS/Safari 占比不低（沙盘师用 iPad 录音）。真机验证已列入
 #### 6.2.10 一句话总结
 
 上面 9 条里，**6.2.6（读屏）和 6.2.5（跨浏览器）是"永远无法自动化"的**，
-必须靠人工验收；**6.2.7（键盘）已修复**（v2.0 收尾补上，见该节）；
-其余 6 条是"知道有风险，且已有间接防线，但防线不厚"。
+必须靠人工验收；**6.2.7（键盘）和 6.2.8（IndexedDB 降级）已修复/已补测**
+（v2.0 收尾补上，见各自小节）；其余 5 条是"知道有风险，且已有间接防线，
+但防线不厚"。
 
 判断某个缺口要不要现在补的标准不是"重要不重要"，
-而是**"出事时用户是否会发现并报告"**。静默丢数据（6.2.8、6.2.9）
+而是**"出事时用户是否会发现并报告"**。静默丢数据（6.2.9 及降级路径）
 最危险，因为它不会产生任何反馈。
+
+另一条经验：**"需要真实 X"经常是懒惰的托词**。6.2.8 挂了一整个版本，
+理由写的是"需要真实 IDB"，而实际只需要 `vi.stubGlobal('indexedDB', undefined)`
+—— 十分钟的事。写「不可测」之前，先问一句：**触发条件真的需要那个真实对象吗？**
 
 ### 6.3 沙面编码体积：不是 bug，是预算口径
 
@@ -1797,6 +1854,9 @@ jobs:
       - run: node scripts/audit/docs-numbers-self-test.mjs  # 数字审计自己会红吗
       - run: node scripts/audit/format-doc-self-test.mjs    # FORMAT.md §10.1 表里每一格都验过
       - run: node scripts/audit/symbol-pack-doc-self-test.mjs # SYMBOL_PACK.md §1.5 的示例真的能跑
+
+      # ---- 存储降级（§6.2.8）----
+      - run: node scripts/audit/idb-fallback-self-test.mjs  # 降级用例真的会因为改坏而降吗
 
       # ---- 格式校验器（两份格式都要双向验证）----
       - run: node scripts/audit/validate-pack-self-test.mjs # 沙具包校验器：好包过、坏包红、文档一致
