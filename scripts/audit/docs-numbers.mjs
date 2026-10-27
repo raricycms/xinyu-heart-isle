@@ -156,6 +156,150 @@ if (failures > 0) {
   process.exit(1);
 }
 
+/* ── 全文档扫描：同一个事实被写在多处时，每一处都要对 ──────────── */
+/*
+ * ── 为什么需要这一条（v2.0 收尾时发现的盲区）───────────────────
+ *
+ * 上面那个 CLAIMS 表只校验**一个位置**（VISION §1.2 评分卡的 D2 行）。
+ * 但「24 子类」这个事实在 VISION 里出现了三次：
+ *
+ *   1. §1.2 D2 评分卡    ← CLAIMS 校验这一处
+ *   2. §3 产品设计原则里的「6 大类 → 18 子类」（需求描述）
+ *   3. §9 版本路线图里的「300+ 沙具 + 18 子类」
+ *
+ * 实际交付是 24 子类（超出要求的 18）。第 1 处是对的，
+ * 第 2、3 处一直挂着过时的 18 —— 因为**门禁只盯了一处**。
+ *
+ * 这是「文档数字」的第四种形态：不是数字漂了，而是
+ * **同一个事实被写了多份，门禁只校验了其中一份**。
+ * 剩下的几份没人管，读文档的人就会拿到互相矛盾的信息。
+ *
+ * ── 检查方式 ────────────────────────────────────────────────────
+ *
+ * 扫**所有** Markdown（根目录 + docs/），找「N 子类」和「N 大类」
+ * 的每一次出现，全部必须等于代码里的真实值。
+ *
+ * 唯一的例外是明确标注了历史/需求语境的行 —— 例如
+ * 「6 大类 → 18 子类」是**需求**描述，18 是当时的要求。
+ * 这类行必须同时出现「实际」二字，否则视为过时描述。
+ * （宁可要求作者多写两个字，也不要放过一个自相矛盾的文档。）
+ */
+const SUB_RE = /(\d+)\s*个?\s*子类/g;
+const CAT_RE = /(\d+)\s*个?\s*大类/g;
+
+const docFiles = [
+  ...readdirSync('.').filter((f) => f.endsWith('.md')),
+  ...readdirSync('docs').filter((f) => f.endsWith('.md')).map((f) => join('docs', f)),
+];
+
+/*
+ * 允许写历史数字的语境：同一行里同时出现这些词之一，
+ * 说明作者在讲「曾经要求过什么」，而不是「现在是什么」。
+ * 但必须配一个「实际 N」把当前值也说清，否则读者只看到旧数字。
+ */
+const HISTORICAL_HINTS = ['实际'];
+
+let multiSiteChecked = 0;
+const multiSiteFailures = [];
+
+for (const file of docFiles) {
+  let text;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    continue;
+  }
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    /*
+     * ⚠️ 必须按 Markdown **单元格**（`|` 分隔）检查，而不是整行。
+     *
+     * 第一版按整行扫，结果 VISION §1.2 的 D2 行被误判：
+     *
+     *   | D2 | … | **4/5** 327 个沙具 / 24 子类 / 6 大类 … | 5/5（300+ CC0 资产、18 子类…） |
+     *
+     * 同一行里"24 子类"是**现状**、"18 子类"是**v2.5 目标**，
+     * 两个都对，但整行扫会把 18 判成过时。
+     *
+     * 按单元格切开后，每个单元格内部语境一致，判断才可靠。
+     * 没有 `|` 的行（普通段落/列表项）整体当作一个单元格。
+     */
+    const cells = line.includes('|') ? line.split('|') : [line];
+
+    /*
+     * 整行级别的「已说明演进」豁免。
+     *
+     * 评分卡和 roadmap 这类表格里，同一行常有多个阶段的数字：
+     *
+     *   | D2 | …（当前）| 2/5（59 个 emoji、6 类）| 4/5 327 个沙具 / 24 子类 | 5/5（300+ 资产、18 子类）|
+     *                          ↑ 起点              ↑ 现状                 ↑ v2.5 满分标准
+     *
+     * `18` 在这里不是"过时"，是**满分标准**。只要**整行**任一处
+     * 明确写出了「实际 … 真实值」，就说明作者已经交代了当前值。
+     *
+     * 第二条豁免专门给评分卡：行内出现多个 `N/5` 说明这是分档标准表，
+     * 但必须**同时**出现真实子类数和真实大类数，才认为它已经写对了
+     * 当前值 —— 真正过时的行不会有正确的 24，依然会红。
+     */
+    const isScorecard = (line.match(/\d\/5/g) ?? []).length >= 2;
+    const scorecardHasActual =
+      isScorecard &&
+      new RegExp(`${actualSubcategoryCount}\\s*个?\\s*子类`).test(line) &&
+      new RegExp(`${actualCategoryCount}\\s*个?\\s*大类`).test(line);
+
+    const lineHasActual = (actual) =>
+      scorecardHasActual ||
+      (HISTORICAL_HINTS.some((h) => line.includes(h)) &&
+        new RegExp(`实际[^。；]{0,16}${actual}`).test(line));
+
+    for (const cell of cells) {
+      for (const [re, label, actual] of [
+        [SUB_RE, '子类', actualSubcategoryCount],
+        [CAT_RE, '大类', actualCategoryCount],
+      ]) {
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(cell)) !== null) {
+          const claimed = Number(m[1]);
+          multiSiteChecked += 1;
+          if (claimed === actual) continue;
+          if (lineHasActual(actual)) continue;
+
+          multiSiteFailures.push({
+            file,
+            line: i + 1,
+            label,
+            claimed,
+            actual,
+            text: cell.trim().slice(0, 110),
+          });
+        }
+      }
+    }
+  }
+}
+
+if (multiSiteFailures.length > 0) {
+  console.error('');
+  console.error(`✗ 有 ${multiSiteFailures.length} 处「${'子类/大类'}」数字与代码不符`);
+  console.error('');
+  for (const f of multiSiteFailures) {
+    console.error(`  ${f.file}:${f.line}  写了 ${f.claimed} 个${f.label}，代码是 ${f.actual}`);
+    console.error(`    > ${f.text}`);
+  }
+  console.error('');
+  console.error('  同一个事实被写在多处时，每一处都要对。');
+  console.error('  如果那一行讲的是「当初要求多少」而不是「现在是多少」，');
+  console.error('  请在**同一行**补上「实际 N」，让读者能看到当前值。');
+  process.exit(1);
+}
+
+console.log(
+  `  ✓ 全文档 ${docFiles.length} 个 Markdown 里，${multiSiteChecked} 处「子类/大类」数字全部等于代码值`,
+);
+
 /* ── 文档里引用的「自测项数」───────────────────────────────────── */
 /*
  * 这是上面「文档数字」的第三种形态，也是最阴的一种。

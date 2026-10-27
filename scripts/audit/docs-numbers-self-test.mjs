@@ -170,6 +170,64 @@ function check(name, ok, detail) {
   check('还原后 VISION 内容完全一致', readFileSync(VISION, 'utf8') === originalVision);
 }
 
+/* ── 用例 6b：同一个事实写在多处时，每一处都要对 ──────────────── */
+/*
+ * 第四种「文档数字」幽灵：不是数字漂了，而是**同一个事实被写了多份，
+ * 门禁只校验了其中一份**。
+ *
+ * v2.0 收尾时发现：「24 子类」在 VISION 里出现 4 次，而 CLAIMS 表
+ * 只校验 §1.2 评分卡那一处。另外 3 处一直挂着过时的「18 子类」，
+ * 因为没人看 —— 读文档的人会拿到互相矛盾的信息。
+ *
+ * 新增的全文档扫描解决了这个盲区。这里的变异证明它真的会红，
+ * 同时证明它**不会误报合法的演进说明**（「实际交付 24 子类」）。
+ */
+{
+  const VISION = 'docs/VISION.md';
+  const originalVision = readFileSync(VISION, 'utf8');
+
+  try {
+    /* 6b-1：正文里塞一个过时的子类数字 */
+    writeFileSync(VISION, originalVision + '\n\n本项目提供 19 个子类。\n', 'utf8');
+    let r = runAudit();
+    check('正文写错子类数时退出 1', r.code === 1, 'code=' + r.code);
+    check('  报出那个错误数字', /写了 19 个子类/.test(r.out), r.out.slice(-300));
+    check('  报出代码里的真实值', /代码是 24/.test(r.out), r.out.slice(-300));
+
+    /* 6b-2：把评分卡里正确的 24 改成 30 */
+    const wrongSub = originalVision.replace('327 个沙具 / 24 子类', '327 个沙具 / 30 子类');
+    check('变异点（评分卡 24→30）已定位', wrongSub !== originalVision);
+    writeFileSync(VISION, wrongSub, 'utf8');
+    r = runAudit();
+    check('评分卡数字改错后退出 1', r.code === 1, 'code=' + r.code);
+
+    /* 6b-3：大类数改错 */
+    const wrongCat = originalVision.replace('24 子类 / 6 大类', '24 子类 / 8 大类');
+    check('变异点（大类 6→8）已定位', wrongCat !== originalVision);
+    writeFileSync(VISION, wrongCat, 'utf8');
+    r = runAudit();
+    check('大类数改错后退出 1', r.code === 1, 'code=' + r.code);
+  } finally {
+    writeFileSync(VISION, originalVision, 'utf8');
+  }
+
+  /*
+   * 6b-4：反向断言 —— 合法的演进说明不能被误报。
+   *
+   * 「分类本体：6 大类 → 18 子类」是**需求**描述，18 是当时的要求；
+   * 同一行后面写着「实际交付 24 子类」。这是对的，不该红。
+   *
+   * 没有这条反向断言，作者就会被迫删掉历史说明来让门禁变绿 ——
+   * 那才是真正的损失。（这个坑本轮已经踩过一次：第一版豁免写死了
+   * `实际 ${actual}`，把 3 处合法说明全判红。）
+   */
+  check('文档里保留了「实际交付 24 子类」这类演进说明',
+    /实际交付 24 子类/.test(originalVision));
+  const r2 = runAudit();
+  check('  它没有被误报（豁免生效）', r2.code === 0, r2.out.slice(-300));
+  check('还原后 VISION 内容完全一致', readFileSync(VISION, 'utf8') === originalVision);
+}
+
 /* ── 用例 7：恢复后必须重新变绿 ──────────────────────────────── */
 {
   const r = runAudit();
