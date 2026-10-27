@@ -77,7 +77,7 @@ const DIST_DIR = 'dist';
 const SHOT_DIR = 'tmp/shots-routes';
 
 /**
- * 每条路由至少要有的可见文字量。
+ * 每条路由至少要有的文本量。
  *
  * 20 个字符是个保守下界：一个真实的页面（哪怕只有标题 + 一句说明）
  * 都远超这个数，而"只有壳"的页面通常是 0。
@@ -86,6 +86,19 @@ const SHOT_DIR = 'tmp/shots-routes';
  * 定高了会因为改了文案就红。
  */
 const MIN_MAIN_TEXT = 20;
+
+/**
+ * 移动端视口宽度。
+ *
+ * E2E 的 `mobile-390` 场景只跑了 5 条路由（`/`、`/sandbox`、`/records`、
+ * `/toolbox/breathing-478`、`/scales/phq-9`），而应用有 15 条。
+ * §6.2.2 写着「**移动端尤其危险**，因为 E2E 只跑桌面视口」——
+ * 这句在 v2.0 已经部分过时（有 mobile-390 了），但覆盖不全这一点仍然成立。
+ *
+ * 在同一个门禁里加一趟移动端 pass，成本很低（复用同一个浏览器），
+ * 收益是「15 条路由在手机上都不横向溢出」变成可审计的事实。
+ */
+const MOBILE_WIDTH = 390;
 
 /** 应用的全部路由（与 src/App.tsx 对齐，含参数示例） */
 const ROUTES = [
@@ -285,6 +298,113 @@ try {
       }
     } catch (error) {
       record(route.path, `${route.name}：加载成功`, false, String(error).slice(0, 160));
+    } finally {
+      await page.close();
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 第二趟：移动端 390px —— 补 E2E mobile-390 只跑 5 条路由的缺口        */
+  /* ------------------------------------------------------------------ */
+  console.log('');
+  console.log(`  移动端 ${MOBILE_WIDTH}px：每条路由都不许横向溢出`);
+
+  for (const route of ROUTES) {
+    const page = await browser.newPage();
+    /*
+     * `isMobile: true` 会启用**布局视口**语义，从而让下面的基准
+     * 检查失真 —— 所以这里**不传** isMobile，只把视口设成 390 宽。
+     *
+     * E2E 的 mobile-390 用了 isMobile: true，因此必须把基准
+     * 写死成 390 而不是 window.innerWidth（见那里的长注释：
+     * 布局视口会被溢出内容撑大，500px 的 div 会让 innerWidth
+     * 从 390 变成 501，于是 `scrollWidth > innerWidth` 永远 false）。
+     *
+     * 这里用真实 CSS 视口（非布局视口），`innerWidth` 就是 390，
+     * 但仍沿用写死基准的写法 —— 两边判据一致，避免出现
+     * 「E2E 红、路由门禁绿」这种最消耗信任的分裂。
+     */
+    await page.setViewport({ width: MOBILE_WIDTH, height: 844 });
+
+    try {
+      await page.goto(BASE + route.path, {
+        waitUntil: 'networkidle2',
+        timeout: 20000,
+      });
+      await page
+        .waitForFunction(() => document.querySelector('[data-testid="route-loading"]') === null, {
+          timeout: 10000,
+        })
+        .catch(() => {});
+      /* 等布局稳定：字体加载会改变宽度 */
+      await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            let last = '';
+            let same = 0;
+            const tick = () => {
+              const key = `${document.body.scrollWidth}x${document.body.scrollHeight}`;
+              same = key === last ? same + 1 : 0;
+              last = key;
+              if (same >= 3) resolve();
+              else setTimeout(tick, 120);
+            };
+            tick();
+          }),
+      );
+
+      const layout = await page.evaluate((targetWidth) => {
+        const docWidth = document.documentElement.scrollWidth;
+
+        /*
+         * 排除**自己的滚动容器**：`.ss-toolbar` 之类有意做成
+         * `overflow-x: auto` 的横向工具条，子元素本来就该排在
+         * 视口之外等用户滑动。判据看错会得到相反结论。
+         * （这段逻辑与 E2E mobile-390 一致，理由见那里的注释）
+         */
+        const inScrollContainer = (element) => {
+          let node = element.parentElement;
+          while (node !== null && node !== document.body) {
+            const overflowX = getComputedStyle(node).overflowX;
+            if (overflowX === 'auto' || overflowX === 'scroll') return true;
+            node = node.parentElement;
+          }
+          return false;
+        };
+
+        const overflowing = [];
+        for (const element of document.body.querySelectorAll('*')) {
+          const box = element.getBoundingClientRect();
+          if (box.width === 0 || box.height === 0) continue;
+          if (box.right <= targetWidth + 1) continue;
+          if (inScrollContainer(element)) continue;
+          const parent = element.parentElement;
+          if (parent !== null && parent.getBoundingClientRect().right > targetWidth + 1) continue;
+          const cls = typeof element.className === 'string' ? element.className : '';
+          overflowing.push(`${element.tagName.toLowerCase()}${cls ? '.' + cls.split(' ')[0] : ''}`);
+        }
+        return { docWidth, overflowing: overflowing.slice(0, 4) };
+      }, MOBILE_WIDTH);
+
+      record(
+        route.path,
+        `${route.name}：390px 无横向滚动（文档宽 ${layout.docWidth}）`,
+        layout.docWidth <= MOBILE_WIDTH + 1,
+        `文档宽 ${layout.docWidth} > ${MOBILE_WIDTH + 1}`,
+      );
+      record(
+        route.path,
+        `${route.name}：390px 无元素溢出右缘`,
+        layout.overflowing.length === 0,
+        layout.overflowing.join(', '),
+      );
+
+      if (layout.docWidth > MOBILE_WIDTH + 1 || layout.overflowing.length > 0) {
+        const safe = route.path.replace(/[^a-z0-9]+/gi, '_') || 'root';
+        await page.screenshot({ path: `${SHOT_DIR}/mobile${safe}.png`, fullPage: true });
+      }
+    } catch (error) {
+      record(route.path, `${route.name}：390px 加载成功`, false, String(error).slice(0, 160));
     } finally {
       await page.close();
     }

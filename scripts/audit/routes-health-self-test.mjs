@@ -41,8 +41,10 @@ import { spawnSync } from 'node:child_process';
 
 const APP = 'src/App.tsx';
 const SHELL = 'src/components/layout/AppShell.tsx';
+const CSS = 'src/styles/global.css';
 const aboutOrig = readFileSync(APP, 'utf8');
 const shellOrig = readFileSync(SHELL, 'utf8');
+const cssOrig = readFileSync(CSS, 'utf8');
 
 let checks = 0;
 let failures = 0;
@@ -70,6 +72,7 @@ function runGate() {
 function restore() {
   writeFileSync(APP, aboutOrig, 'utf8');
   writeFileSync(SHELL, shellOrig, 'utf8');
+  writeFileSync(CSS, cssOrig, 'utf8');
 }
 process.on('exit', restore);
 
@@ -82,7 +85,7 @@ console.log('');
   const b = build();
   check('基线 build 成功', b.code === 0, String(b.code));
   const g = runGate();
-  check('基线 105 项全绿', g.code === 0 && /105 项检查，0 项失败/.test(g.out), 'exit=' + g.code);
+  check('基线 135 项全绿', g.code === 0 && /135 项检查，0 项失败/.test(g.out), 'exit=' + g.code);
 }
 
 /* ── 变异 1：让 <main> 变成 display:none（模拟白屏）──────────── */
@@ -177,15 +180,48 @@ console.log('');
   }
 }
 
+/* ── 变异 3：让移动端横向溢出（body min-width）─────────────── */
+{
+  /*
+   * 检验移动端那 30 项断言（15 条路由 × 2 项）。
+   *
+   * E2E 的 `mobile-390` 只跑 5 条路由，而应用有 15 条 ——
+   * §6.2.2 说「移动端尤其危险，因为 E2E 只跑桌面视口」，
+   * 这句部分过时（有 mobile-390 了）但覆盖不全仍然成立。
+   *
+   * 从全局 CSS 注入 `body { min-width: 900px }`，任何页面都会溢出。
+   * 如果门禁的移动端断言是幽灵，这条变异不会红。
+   */
+  const mutated =
+    cssOrig + '\n\n/* 变异注入：强制最小宽度，制造横向溢出 */\nbody { min-width: 900px !important; }\n';
+  check('变异点 3 已定位（body min-width）', mutated !== cssOrig);
+  if (mutated !== cssOrig) {
+    writeFileSync(CSS, mutated, 'utf8');
+    const b = build();
+    if (b.code !== 0) {
+      check('  变异版本能构建', false, b.out.slice(-200));
+    } else {
+      const g = runGate();
+      check('  门禁变红', g.code !== 0, 'exit=' + g.code);
+      check('  红的正是「横向滚动」那条', /横向滚动/.test(g.out), g.out.slice(-400));
+    }
+    restore();
+  }
+}
+
 /* ── 恢复 ────────────────────────────────────────────────────── */
 {
   restore();
   const b = build();
   check('恢复后 build 成功', b.code === 0, String(b.code));
   const g = runGate();
-  check('恢复后重新全绿', g.code === 0 && /105 项检查，0 项失败/.test(g.out), 'exit=' + g.code);
-  check('两个源文件逐字节还原',
-    readFileSync(APP, 'utf8') === aboutOrig && readFileSync(SHELL, 'utf8') === shellOrig);
+  check('恢复后重新全绿', g.code === 0 && /135 项检查，0 项失败/.test(g.out), 'exit=' + g.code);
+  check(
+    '三个源文件逐字节还原',
+    readFileSync(APP, 'utf8') === aboutOrig &&
+      readFileSync(SHELL, 'utf8') === shellOrig &&
+      readFileSync(CSS, 'utf8') === cssOrig,
+  );
 }
 
 console.log('');
@@ -193,4 +229,4 @@ if (failures > 0) {
   console.error('✗ ' + failures + ' / ' + checks + ' 项失败');
   process.exit(1);
 }
-console.log('✓ ' + checks + ' 项：白屏与运行时错误都会让门禁变红');
+console.log('✓ ' + checks + ' 项：白屏、运行时错误、移动端溢出都会让门禁变红');
